@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Models\User;
+use App\Services\RouterOs\Contracts\RouterOsConnector;
+use App\Services\RouterOs\LiveRouterOsConnector;
 use App\Support\Authorization\Permissions;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Contracts\Auth\Access\Authorizable;
@@ -15,6 +17,10 @@ class TenancyServiceProvider extends ServiceProvider
     {
         // One tenant per request, job or command.
         $this->app->singleton(TenantContext::class);
+
+        // Nothing in the application constructs a RouterOS socket itself; tests swap this
+        // binding for an in-memory device.
+        $this->app->bind(RouterOsConnector::class, LiveRouterOsConnector::class);
     }
 
     public function boot(): void

@@ -22,15 +22,28 @@ Local-first: every workflow is proven on XAMPP before anything is deployed.
 
 ## The plane separation
 
-This is the load-bearing decision of the whole design. Business control and network control are
-separate, and the boundary is not negotiable:
+Business control and network control are separate:
 
 - **Laravel is the business plane.** Tenants, customers, plans, subscriptions, invoices, payments,
-  orchestration. It *provisions* RADIUS records; it never speaks the RADIUS protocol.
-- **FreeRADIUS is the network plane.** Authentication, authorization, rate limits, session limits,
-  expiry enforcement, accounting. It is never the source of truth for invoices or payments.
-- **MikroTik RouterOS API is the device plane.** Configuration, operational commands, monitoring.
+  orchestration.
+- **The MikroTik is the network plane.** It authenticates users from its own local user tables.
+- **The RouterOS API is how the two meet.** Laravel writes users onto the device and deletes them
+  when they expire.
 - **WireGuard is the transport plane.** Private management path to routers behind NAT/CGNAT.
+
+### Router-native authentication, not FreeRADIUS
+
+The specification made FreeRADIUS the authentication authority. **That was superseded** on
+2026-08-11: users are written directly onto the router instead.
+
+- HotSpot users live at `/ip/hotspot/user`, PPPoE users at `/ppp/secret`.
+- A HotSpot buyer's username and password are both their M-PESA transaction code.
+- When their time or data runs out, the user row is **deleted from the router**. The payment
+  record stays in the database, which is what feeds the ISP's earnings analytics.
+- PPPoE is the other way round: the ISP creates the credentials and assigns them to a customer.
+
+FreeRADIUS is deferred, not abandoned. Provisioning goes through an abstraction so a RADIUS
+backend can be added later without rewriting the HotSpot and PPPoE layers.
 
 ## Domain chain
 
@@ -121,28 +134,55 @@ Carried from the specification. Violating any of these is a defect, not a style 
 12. Long-running work (router provisioning, notifications, integrations) goes through queues.
 13. No secrets in source control.
 
+## RouterOS integration
+
+Nothing in the application talks to the vendor library or opens a socket itself. Everything goes
+through `App\Services\RouterOs`:
+
+- `Contracts\RouterOsConnector` opens a connection to a `Router`; `Contracts\RouterOsConnection` is
+  the conversation (`get`, `first`, `add`, `update`, `remove`, `execute`).
+- `LiveRouterOsConnection` is the only class that knows `evilfreelancer/routeros-api-php` exists.
+- `Testing\FakeRouterOsConnection` is an in-memory MikroTik: rows are stored per menu path, get an
+  `.id`, and can be filtered, updated and removed. Tests assert on what the device ends up
+  holding, not on a list of calls. `Tests\Concerns\InteractsWithRouters` swaps it in.
+- RouterOS refuses commands with a `!trap` rather than an error, so `run()` inspects every response
+  and raises `RouterOsCommandException`. `trap()` on the fake reproduces this.
+- Timeouts are deliberately short (`config/routeros.php`): provisioning runs while an operator or
+  a captive-portal customer waits.
+
+Router API passwords are `encrypted` and `#[Hidden]`. Health fields and `status` are **not**
+mass-assignable — they are reported by the device, so the probe assigns them directly. `fill()`
+would silently drop them.
+
+Run `php artisan router:test {slug}` to check a device: it reports identity, version, uptime and
+which menus the API user can actually reach.
+
 ## Build phases
 
-Built one phase at a time, never all at once.
+Reordered on 2026-08-11 at the user's direction: routers and the HotSpot/PPPoE layer come before
+plans and billing, because the MikroTik integration is what the rest hangs off.
 
 | # | Deliverable | Status |
 |---|---|---|
 | 1 | Laravel foundation, environment, coding standards | done |
 | 2 | Multi-tenancy, users, roles and policies | done |
 | 3 | Customers and service accounts | done |
-| 4 | Plans and subscription lifecycle | |
-| 5 | Invoices and billing | |
-| 6 | Lipa na M-PESA integration | |
-| 7 | FreeRADIUS integration and accounting | |
-| 8 | MikroTik router domain and API client | |
-| 9 | WireGuard provisioning and router registration | |
-| 10 | PPPoE provisioning | |
-| 11 | HotSpot and voucher system | |
+| 4 | Router domain, RouterOS API client, health probe | done |
+| 5 | HotSpot and PPPoE plans, pushed to routers as profiles | |
+| 6 | PPPoE user provisioning onto `/ppp/secret` | |
+| 7 | HotSpot user provisioning and expiry sweeper | |
+| 8 | Captive portal | |
+| 9 | Lipa na M-PESA, and portal purchase end to end | |
+| 10 | Subscriptions, invoices and renewals | |
+| 11 | Vouchers | |
 | 12 | Monitoring and operational dashboards | |
-| 13 | Reports | |
-| 14 | Security and audit | |
-| 15 | Automated tests | |
+| 13 | Reports and earnings analytics | |
+| 14 | WireGuard management network | |
+| 15 | Security review and audit | |
 | 16 | Production deployment | |
+
+FreeRADIUS is no longer a phase of its own; it becomes an alternative provisioning backend if and
+when scale calls for it.
 
 ## Commands
 

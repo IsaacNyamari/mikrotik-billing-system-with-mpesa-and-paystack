@@ -24,6 +24,14 @@
                         </flux:sidebar.item>
                     </flux:sidebar.group>
                 @endcan
+
+                @can('viewAny', App\Models\Router::class)
+                    <flux:sidebar.group :heading="__('Network')" class="grid">
+                        <flux:sidebar.item icon="server" :href="route('routers.index')" :current="request()->routeIs('routers.*')" wire:navigate>
+                            {{ __('Routers') }}
+                        </flux:sidebar.item>
+                    </flux:sidebar.group>
+                @endcan
             </flux:sidebar.nav>
 
             <flux:spacer />
