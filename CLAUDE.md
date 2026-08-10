@@ -180,6 +180,40 @@ the same plan each buy their own hour.
 
 `php artisan plan:push {code} --router=slug` pushes from the terminal.
 
+## Provisioning users onto the router
+
+Two provisioners, deliberately asymmetric because the products are:
+
+**`HotspotUserProvisioner`** — a walk-in buys a package. `issue()` records the purchase *first*,
+then pushes; a router that is briefly unreachable must not lose a customer who has paid. Username
+and password are both the payment reference. `limit-uptime` and `limit-bytes-total` go on the
+**user**, not the profile — two people on the same plan each bought their own hour. Re-issuing the
+same reference updates rather than duplicating, because M-PESA delivers callbacks more than once.
+
+`remove()` reads usage off the device **before** deleting the row: once it is gone RouterOS has no
+memory of it, and that reading is the only evidence of what was consumed. The `hotspot_users`
+record always survives — it is what earnings reporting is built from.
+
+**`PppoeSecretProvisioner`** — the ISP creates the line and assigns it. Suspension *disables* the
+secret rather than deleting it, since a suspended line usually comes back; only termination
+removes it. `ChangeServiceAccountStatus` calls this, so a suspension actually cuts the line
+instead of only changing a database row.
+
+Both **disconnect the live session** after taking access away. Deleting a HotSpot user or
+disabling a PPP secret does not end a session already running, so without this a suspended
+customer stays online until their session happens to drop.
+
+Neither provisioner throws on a router failure — the error is recorded on the row for the sweeper
+or an operator to retry.
+
+### Scheduled work (`routes/console.php`)
+
+- `hotspot:sweep --retry` every minute — removes spent packages, and re-pushes ones that were paid
+  for while a router was down. A package that expired while stuck is *not* resurrected.
+- `router:test` every five minutes — keeps device health honest and records outages.
+
+The scheduler must actually be running: `php artisan schedule:work`.
+
 ### The live test device
 
 An RB951Ui-2HnD on RouterOS 7.23.2, reachable on the LAN. Its HotSpot is already configured —
@@ -199,8 +233,8 @@ plans and billing, because the MikroTik integration is what the rest hangs off.
 | 3 | Customers and service accounts | done |
 | 4 | Router domain, RouterOS API client, health probe | done |
 | 5 | HotSpot and PPPoE plans, pushed to routers as profiles | done |
-| 6 | PPPoE user provisioning onto `/ppp/secret` | |
-| 7 | HotSpot user provisioning and expiry sweeper | |
+| 6 | PPPoE user provisioning onto `/ppp/secret` | done |
+| 7 | HotSpot user provisioning and expiry sweeper | done |
 | 8 | Captive portal | |
 | 9 | Lipa na M-PESA, and portal purchase end to end | |
 | 10 | Subscriptions, invoices and renewals | |

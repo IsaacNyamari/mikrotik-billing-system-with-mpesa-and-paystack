@@ -24,6 +24,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int $id
  * @property int $tenant_id
  * @property int $customer_id
+ * @property int|null $plan_id
+ * @property int|null $router_id
  * @property string $account_number
  * @property ServiceType $type
  * @property string|null $label
@@ -33,13 +35,18 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string|null $static_ip
  * @property string|null $mac_address
  * @property string|null $installation_address
+ * @property string|null $routeros_id
  * @property CarbonImmutable|null $activated_at
+ * @property CarbonImmutable|null $provisioned_at
+ * @property string|null $provision_error
  * @property CarbonImmutable|null $suspended_at
  * @property CarbonImmutable|null $terminated_at
  * @property string|null $notes
  */
 #[Fillable([
     'customer_id',
+    'plan_id',
+    'router_id',
     'account_number',
     'type',
     'label',
@@ -76,6 +83,7 @@ class ServiceAccount extends Model
             // needs the cleartext, so it is encrypted at rest rather than hashed.
             'secret' => 'encrypted',
             'activated_at' => 'datetime',
+            'provisioned_at' => 'datetime',
             'suspended_at' => 'datetime',
             'terminated_at' => 'datetime',
         ];
@@ -87,6 +95,32 @@ class ServiceAccount extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * @return BelongsTo<Plan, $this>
+     */
+    public function plan(): BelongsTo
+    {
+        return $this->belongsTo(Plan::class);
+    }
+
+    /**
+     * The device this account's credentials live on.
+     *
+     * @return BelongsTo<Router, $this>
+     */
+    public function router(): BelongsTo
+    {
+        return $this->belongsTo(Router::class);
+    }
+
+    /**
+     * Whether the router currently holds this account's credentials.
+     */
+    public function isProvisioned(): bool
+    {
+        return $this->provisioned_at !== null && $this->provision_error === null;
     }
 
     /**

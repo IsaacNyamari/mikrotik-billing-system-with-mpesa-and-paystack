@@ -3,7 +3,9 @@
 namespace App\Actions\ServiceAccounts;
 
 use App\Enums\ServiceAccountStatus;
+use App\Enums\ServiceType;
 use App\Models\ServiceAccount;
+use App\Services\RouterOs\PppoeSecretProvisioner;
 use App\Support\Audit\AuditLogger;
 use Illuminate\Support\Facades\DB;
 use LogicException;
@@ -17,7 +19,10 @@ use LogicException;
  */
 class ChangeServiceAccountStatus
 {
-    public function __construct(protected AuditLogger $audit) {}
+    public function __construct(
+        protected AuditLogger $audit,
+        protected PppoeSecretProvisioner $pppoe,
+    ) {}
 
     public function handle(
         ServiceAccount $account,
@@ -63,7 +68,28 @@ class ChangeServiceAccountStatus
                 newValues: ['status' => $status->value],
             );
 
+            $this->syncToRouter($account, $status);
+
             return $account;
         });
+    }
+
+    /**
+     * Make the router agree with the new status.
+     *
+     * A suspension that only changes a database row leaves the customer online, so this is
+     * the half of the operation that actually does something.
+     */
+    protected function syncToRouter(ServiceAccount $account, ServiceAccountStatus $status): void
+    {
+        if ($account->type !== ServiceType::Pppoe || $account->router_id === null) {
+            return;
+        }
+
+        // A terminated line is gone for good, so its credentials come off the device
+        // entirely. Everything else stays, disabled when it should not be working.
+        $status->isFinal()
+            ? $this->pppoe->remove($account)
+            : $this->pppoe->push($account);
     }
 }
