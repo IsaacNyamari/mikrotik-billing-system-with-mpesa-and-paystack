@@ -3,9 +3,12 @@
 namespace Database\Seeders;
 
 use App\Enums\TenantStatus;
+use App\Models\Customer;
+use App\Models\ServiceAccount;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\Authorization\Roles;
+use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -63,5 +66,30 @@ class DatabaseSeeder extends Seeder
         );
 
         $owner->assignRole(Roles::ISP_OWNER);
+
+        Tenancy::forTenant($tenant, function (): void {
+            if (Customer::query()->exists()) {
+                return;
+            }
+
+            Customer::factory()
+                ->count(12)
+                ->has(ServiceAccount::factory()->count(fake()->numberBetween(1, 2)), 'serviceAccounts')
+                ->create();
+
+            // One customer with two very different services, to exercise the case the whole
+            // service-account model exists for.
+            $multi = Customer::factory()->create(['name' => 'Grace Wanjiru']);
+
+            ServiceAccount::factory()->for($multi)->create([
+                'label' => 'Home line',
+                'username' => 'grace-home',
+            ]);
+
+            ServiceAccount::factory()->for($multi)->hotspot()->create([
+                'label' => 'Shop backup',
+                'username' => 'grace-shop',
+            ]);
+        });
     }
 }

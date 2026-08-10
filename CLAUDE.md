@@ -67,6 +67,32 @@ Single shared database, `tenant_id` column on every tenant-owned table, enforced
 Never add `WithoutModelEvents` to a seeder — tenant stamping and UUID generation both ride on
 model events, so suppressing them seeds rows that could not exist at runtime.
 
+`ResolveTenant` is pinned ahead of `SubstituteBindings` in the middleware priority list
+(`bootstrap/app.php`). That ordering is load-bearing: route model binding runs a scoped query, so
+the tenant must already be known or strict scoping rejects every `{customer}` lookup.
+
+`Livewire::test()` invokes a component directly and runs no middleware, so tests using it must
+call `Tenancy::set()` themselves. Real requests — full page loads and Livewire's update endpoint —
+both go through the web group and resolve the tenant normally.
+
+## Customers and service accounts
+
+A `Customer` is a billing and support identity. A `ServiceAccount` is the network identity, and
+one customer may hold several — plans, subscriptions, RADIUS identities and sessions all attach to
+the service account, never to the customer.
+
+- Customer numbers (`CUS-000001`) and account numbers (`SVC-000001`) are allocated per ISP by
+  `SequenceGenerator`, which locks the tenant row and must run inside a transaction. A number that
+  has been used once is never reissued, including after a soft delete.
+- Network logins are unique **within** an ISP, not across the platform, so two ISPs may each have a
+  subscriber called `john`. Global RADIUS uniqueness is a Phase 7 concern and will be solved with a
+  realm-qualified identity rather than by tightening this index.
+- The network secret is `encrypted` rather than hashed, because RADIUS provisioning needs the
+  cleartext. It is hidden from serialisation and gated behind its own policy check.
+- Status changes go through `ChangeServiceAccountStatus`, never by assigning to the model. From
+  Phase 7 that action is also where RADIUS is refreshed and live sessions are dropped.
+- A blocked customer takes all of their services offline regardless of each service's own status.
+
 ## Authorization
 
 - `App\Support\Authorization\Permissions` is the permission catalogue and the single source of
@@ -103,7 +129,7 @@ Built one phase at a time, never all at once.
 |---|---|---|
 | 1 | Laravel foundation, environment, coding standards | done |
 | 2 | Multi-tenancy, users, roles and policies | done |
-| 3 | Customers and service accounts | |
+| 3 | Customers and service accounts | done |
 | 4 | Plans and subscription lifecycle | |
 | 5 | Invoices and billing | |
 | 6 | Lipa na M-PESA integration | |

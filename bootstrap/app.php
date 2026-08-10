@@ -5,6 +5,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -18,6 +19,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             ResolveTenant::class,
         ]);
+
+        // Ordering is load-bearing, not cosmetic. Route model binding resolves {customer} with
+        // a scoped query, so the tenant has to be known before SubstituteBindings runs —
+        // otherwise strict scoping rejects the lookup and every detail page 500s.
+        $middleware->prependToPriorityList(
+            before: SubstituteBindings::class,
+            prepend: ResolveTenant::class,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

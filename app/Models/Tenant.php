@@ -3,13 +3,13 @@
 namespace App\Models;
 
 use App\Enums\TenantStatus;
+use Carbon\CarbonImmutable;
 use Database\Factories\TenantFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
@@ -27,8 +27,8 @@ use Illuminate\Support\Str;
  * @property string $timezone
  * @property string $currency
  * @property array<string, mixed>|null $settings
- * @property Carbon|null $activated_at
- * @property Carbon|null $suspended_at
+ * @property CarbonImmutable|null $activated_at
+ * @property CarbonImmutable|null $suspended_at
  */
 #[Fillable([
     'name',

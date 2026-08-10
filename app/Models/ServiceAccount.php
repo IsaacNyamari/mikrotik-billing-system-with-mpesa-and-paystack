@@ -1,0 +1,119 @@
+<?php
+
+namespace App\Models;
+
+use App\Enums\ServiceAccountStatus;
+use App\Enums\ServiceType;
+use App\Models\Concerns\BelongsToTenant;
+use Carbon\CarbonImmutable;
+use Database\Factories\ServiceAccountFactory;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+/**
+ * One network service belonging to a customer: a PPPoE line, a HotSpot login, a static-IP link.
+ *
+ * This is the identity the network actually authenticates. Plans, subscriptions, RADIUS
+ * identities and sessions all attach here rather than to the customer.
+ *
+ * @property int $id
+ * @property int $tenant_id
+ * @property int $customer_id
+ * @property string $account_number
+ * @property ServiceType $type
+ * @property string|null $label
+ * @property string $username
+ * @property string|null $secret
+ * @property ServiceAccountStatus $status
+ * @property string|null $static_ip
+ * @property string|null $mac_address
+ * @property string|null $installation_address
+ * @property CarbonImmutable|null $activated_at
+ * @property CarbonImmutable|null $suspended_at
+ * @property CarbonImmutable|null $terminated_at
+ * @property string|null $notes
+ */
+#[Fillable([
+    'customer_id',
+    'account_number',
+    'type',
+    'label',
+    'username',
+    'secret',
+    'status',
+    'static_ip',
+    'mac_address',
+    'installation_address',
+    'notes',
+])]
+#[Hidden(['secret'])]
+class ServiceAccount extends Model
+{
+    /** @use HasFactory<ServiceAccountFactory> */
+    use BelongsToTenant, HasFactory, SoftDeletes;
+
+    /**
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'status' => 'pending',
+    ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'type' => ServiceType::class,
+            'status' => ServiceAccountStatus::class,
+            // The network password is readable by the platform because RADIUS provisioning
+            // needs the cleartext, so it is encrypted at rest rather than hashed.
+            'secret' => 'encrypted',
+            'activated_at' => 'datetime',
+            'suspended_at' => 'datetime',
+            'terminated_at' => 'datetime',
+        ];
+    }
+
+    /**
+     * @return BelongsTo<Customer, $this>
+     */
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * Whether the network should let this account on right now.
+     *
+     * Both gates have to pass: a blocked customer takes all of their services down, however
+     * healthy the individual account looks.
+     */
+    public function allowsAuthentication(): bool
+    {
+        return $this->status->allowsAuthentication()
+            && $this->customer->status->allowsService();
+    }
+
+    /**
+     * @param  Builder<ServiceAccount>  $query
+     */
+    public function scopeActive(Builder $query): void
+    {
+        $query->where('status', ServiceAccountStatus::Active);
+    }
+
+    /**
+     * @param  Builder<ServiceAccount>  $query
+     */
+    public function scopeOfType(Builder $query, ServiceType $type): void
+    {
+        $query->where('type', $type);
+    }
+}
