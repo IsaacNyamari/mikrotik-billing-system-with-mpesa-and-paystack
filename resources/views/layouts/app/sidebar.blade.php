@@ -30,6 +30,12 @@
                         <flux:sidebar.item icon="server" :href="route('routers.index')" :current="request()->routeIs('routers.*')" wire:navigate>
                             {{ __('Routers') }}
                         </flux:sidebar.item>
+
+                        @can('viewAny', App\Models\Plan::class)
+                            <flux:sidebar.item icon="wifi" :href="route('plans.index')" :current="request()->routeIs('plans.*')" wire:navigate>
+                                {{ __('Plans') }}
+                            </flux:sidebar.item>
+                        @endcan
                     </flux:sidebar.group>
                 @endcan
             </flux:sidebar.nav>

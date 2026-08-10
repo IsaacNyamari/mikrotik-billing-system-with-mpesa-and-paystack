@@ -17,6 +17,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('routers/create', 'pages::routers.form')->name('routers.create');
     Route::livewire('routers/{router}', 'pages::routers.show')->name('routers.show');
     Route::livewire('routers/{router}/edit', 'pages::routers.form')->name('routers.edit');
+
+    Route::livewire('plans', 'pages::plans.index')->name('plans.index');
+    Route::livewire('plans/create', 'pages::plans.form')->name('plans.create');
+    Route::livewire('plans/{plan}/edit', 'pages::plans.form')->name('plans.edit');
 });
 
 require __DIR__.'/settings.php';

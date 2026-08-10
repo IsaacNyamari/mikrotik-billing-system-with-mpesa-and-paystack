@@ -157,6 +157,36 @@ would silently drop them.
 Run `php artisan router:test {slug}` to check a device: it reports identity, version, uptime and
 which menus the API user can actually reach.
 
+## Plans and RouterOS profiles
+
+A `Plan` is a business object. Its network settings are copied onto each router as a RouterOS
+profile by `PlanProfileSynchroniser`; `PlanRouterProfile` records that copy per device, because
+the two drift whenever a push fails or an operator edits the router by hand.
+
+The split matters: **the profile carries what everyone on the plan shares** (speed, devices per
+login); **the individual user row carries the personal quota** (time, data), because two people on
+the same plan each buy their own hour.
+
+- `plans.code` becomes the RouterOS profile name, so it is validated against
+  `/^[A-Za-z0-9][A-Za-z0-9._-]*$/` and is unique per ISP.
+- A profile that already exists under that name is **adopted and updated**, never duplicated — an
+  ISP that hand-built profiles before adopting the platform keeps one of each.
+- `rate-limit` is written `upload/download` — RouterOS reads it rx/tx from the router's point of
+  view, which is the reverse of how the package is sold. Getting this backwards sells a 10 Mbps
+  plan that uploads at 10 and downloads at 1.
+- Times are sent to RouterOS in seconds (`3600s`). The device normalises them to `1h`/`1d` itself,
+  which is verified against real hardware.
+- Sync never throws. An unreachable router is recorded on the pairing for an operator to retry.
+
+`php artisan plan:push {code} --router=slug` pushes from the terminal.
+
+### The live test device
+
+An RB951Ui-2HnD on RouterOS 7.23.2, reachable on the LAN. Its HotSpot is already configured —
+server `billing-hotspot` on `bridge-hotspot`, pool `10.10.10.10-254`, DHCP, server profile at
+`10.10.10.1` with `login-by=http-chap,http-pap`. **PPPoE has no server**, so PPP secrets will not
+authenticate anything until one is bound to an interface.
+
 ## Build phases
 
 Reordered on 2026-08-11 at the user's direction: routers and the HotSpot/PPPoE layer come before
@@ -168,7 +198,7 @@ plans and billing, because the MikroTik integration is what the rest hangs off.
 | 2 | Multi-tenancy, users, roles and policies | done |
 | 3 | Customers and service accounts | done |
 | 4 | Router domain, RouterOS API client, health probe | done |
-| 5 | HotSpot and PPPoE plans, pushed to routers as profiles | |
+| 5 | HotSpot and PPPoE plans, pushed to routers as profiles | done |
 | 6 | PPPoE user provisioning onto `/ppp/secret` | |
 | 7 | HotSpot user provisioning and expiry sweeper | |
 | 8 | Captive portal | |
