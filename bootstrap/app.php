@@ -27,6 +27,12 @@ return Application::configure(basePath: dirname(__DIR__))
             before: SubstituteBindings::class,
             prepend: ResolveTenant::class,
         );
+
+        // Safaricom posts callbacks from its own servers and has no session or CSRF token.
+        // The unguessable token in the URL is what authenticates the request instead.
+        $middleware->validateCsrfTokens(except: [
+            'webhooks/mpesa/*',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

@@ -1,8 +1,17 @@
 <?php
 
+use App\Http\Controllers\MpesaCallbackController;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
+
+// Public, unauthenticated: a customer sitting on a HotSpot before they have paid for anything.
+// The portal key identifies which router — and so which ISP — they landed from.
+Route::livewire('p/{portalKey}', 'pages::portal.index')->name('portal');
+
+// Safaricom posts here. The token in the path is the only credential; CSRF is exempted for it
+// in bootstrap/app.php.
+Route::post('webhooks/mpesa/{token}', MpesaCallbackController::class)->name('webhooks.mpesa');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');

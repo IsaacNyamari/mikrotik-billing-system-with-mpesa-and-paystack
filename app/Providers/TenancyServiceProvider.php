@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Models\User;
+use App\Services\Mpesa\Contracts\MpesaGateway;
+use App\Services\Mpesa\DarajaGateway;
 use App\Services\RouterOs\Contracts\RouterOsConnector;
 use App\Services\RouterOs\LiveRouterOsConnector;
 use App\Support\Authorization\Permissions;
@@ -21,6 +23,9 @@ class TenancyServiceProvider extends ServiceProvider
         // Nothing in the application constructs a RouterOS socket itself; tests swap this
         // binding for an in-memory device.
         $this->app->bind(RouterOsConnector::class, LiveRouterOsConnector::class);
+
+        // Same idea for Safaricom: tests swap this rather than reaching Daraja.
+        $this->app->bind(MpesaGateway::class, DarajaGateway::class);
     }
 
     public function boot(): void

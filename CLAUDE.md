@@ -206,6 +206,32 @@ customer stays online until their session happens to drop.
 Neither provisioner throws on a router failure — the error is recorded on the row for the sweeper
 or an operator to retry.
 
+## Payments and the captive portal
+
+A customer joins the wifi, the HotSpot redirects them to `/p/{portal_key}`, they pick a package,
+pay from their phone, and are logged in without ever typing a username.
+
+- The **portal key** on `routers` identifies the device — and so the ISP — in a public URL that
+  gives away neither the tenant nor a sequential id. The portal is unauthenticated, so it resolves
+  the tenant itself with `Tenancy::withoutScope()` and then binds it. It rebinds on `hydrate()`,
+  because no middleware can do it for a request with nobody signed in.
+- **Access is granted on a verified callback, never on the STK push being accepted.** The push
+  only means Safaricom agreed to ring the phone.
+- Safaricom does not sign callbacks. The unguessable `callback_token` in the URL is what
+  identifies the ISP, and the endpoint is CSRF-exempt (`bootstrap/app.php`).
+- The callback **always answers 200**, including for an unknown token or a malformed body: a
+  non-200 makes Safaricom retry, which only helps when the problem is transient.
+- `CallbackProcessor` is safe to run repeatedly — an already-settled payment returns untouched.
+  Safaricom delivers callbacks more than once.
+- The **M-PESA receipt becomes the username and password** of the HotSpot login.
+- The amount Safaricom reports as paid overwrites the amount asked for; the ISP's books should
+  show the money that actually moved.
+- If the router is unreachable when the callback lands, the payment still settles as paid and the
+  access is left `failed` for `hotspot:sweep --retry` to pick up. The money has moved either way.
+- Daraja rejects decimal amounts, so prices are rounded **up** — rounding down would undercharge.
+- Phone numbers are normalised by `App\Support\PhoneNumber`, not by the gateway, so the stored
+  number is comparable no matter how the customer typed it.
+
 ### Scheduled work (`routes/console.php`)
 
 - `hotspot:sweep --retry` every minute — removes spent packages, and re-pushes ones that were paid
@@ -235,8 +261,8 @@ plans and billing, because the MikroTik integration is what the rest hangs off.
 | 5 | HotSpot and PPPoE plans, pushed to routers as profiles | done |
 | 6 | PPPoE user provisioning onto `/ppp/secret` | done |
 | 7 | HotSpot user provisioning and expiry sweeper | done |
-| 8 | Captive portal | |
-| 9 | Lipa na M-PESA, and portal purchase end to end | |
+| 8 | Captive portal | done |
+| 9 | Lipa na M-PESA, and portal purchase end to end | done |
 | 10 | Subscriptions, invoices and renewals | |
 | 11 | Vouchers | |
 | 12 | Monitoring and operational dashboards | |

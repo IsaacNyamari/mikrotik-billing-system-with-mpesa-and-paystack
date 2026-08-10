@@ -23,6 +23,7 @@ use Illuminate\Support\Str;
  * @property int $tenant_id
  * @property string $name
  * @property string $slug
+ * @property string $portal_key
  * @property string $host
  * @property int $api_port
  * @property string $api_username
@@ -72,6 +73,9 @@ class Router extends Model
     {
         static::creating(function (self $router): void {
             $router->slug ??= Str::slug($router->name);
+            // Identifies this device in public captive-portal URLs. Unguessable, so the
+            // portal address gives away neither the ISP nor a sequential id.
+            $router->portal_key ??= Str::lower(Str::random(24));
         });
     }
 
@@ -124,6 +128,15 @@ class Router extends Model
         $used = $this->total_memory_bytes - $this->free_memory_bytes;
 
         return (int) round($used / $this->total_memory_bytes * 100);
+    }
+
+    /**
+     * Where this router's captive portal lives. This is the address the HotSpot login page
+     * redirects customers to.
+     */
+    public function portalUrl(): string
+    {
+        return route('portal', ['portalKey' => $this->portal_key]);
     }
 
     public function getRouteKeyName(): string
