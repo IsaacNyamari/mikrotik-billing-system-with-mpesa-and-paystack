@@ -30,6 +30,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('plans', 'pages::plans.index')->name('plans.index');
     Route::livewire('plans/create', 'pages::plans.form')->name('plans.create');
     Route::livewire('plans/{plan}/edit', 'pages::plans.form')->name('plans.edit');
+
+    Route::livewire('reports/earnings', 'pages::reports.earnings')->name('reports.earnings');
+    Route::livewire('settings/mpesa', 'pages::settings.mpesa')->name('settings.mpesa');
 });
 
 require __DIR__.'/settings.php';

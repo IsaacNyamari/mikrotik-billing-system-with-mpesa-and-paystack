@@ -38,6 +38,22 @@
                         @endcan
                     </flux:sidebar.group>
                 @endcan
+
+                @canany([App\Support\Authorization\Permissions::REPORTS_VIEW_REVENUE, App\Support\Authorization\Permissions::SETTINGS_MANAGE_PAYMENT_CREDENTIALS])
+                    <flux:sidebar.group :heading="__('Money')" class="grid">
+                        @can(App\Support\Authorization\Permissions::REPORTS_VIEW_REVENUE)
+                            <flux:sidebar.item icon="banknotes" :href="route('reports.earnings')" :current="request()->routeIs('reports.earnings')" wire:navigate>
+                                {{ __('Earnings') }}
+                            </flux:sidebar.item>
+                        @endcan
+
+                        @can(App\Support\Authorization\Permissions::SETTINGS_MANAGE_PAYMENT_CREDENTIALS)
+                            <flux:sidebar.item icon="credit-card" :href="route('settings.mpesa')" :current="request()->routeIs('settings.mpesa')" wire:navigate>
+                                {{ __('M-PESA') }}
+                            </flux:sidebar.item>
+                        @endcan
+                    </flux:sidebar.group>
+                @endcanany
             </flux:sidebar.nav>
 
             <flux:spacer />

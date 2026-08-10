@@ -121,11 +121,14 @@ class Payment extends Model
     }
 
     /**
+     * Columns are qualified because reporting joins payments to plans and routers, and both
+     * of those carry a "status" of their own.
+     *
      * @param  Builder<Payment>  $query
      */
     public function scopePaid(Builder $query): void
     {
-        $query->where('status', PaymentStatus::Paid);
+        $query->where($this->qualifyColumn('status'), PaymentStatus::Paid);
     }
 
     /**
@@ -135,7 +138,7 @@ class Payment extends Model
      */
     public function scopeStale(Builder $query, int $minutes = 5): void
     {
-        $query->where('status', PaymentStatus::Pending)
-            ->where('created_at', '<=', now()->subMinutes($minutes));
+        $query->where($this->qualifyColumn('status'), PaymentStatus::Pending)
+            ->where($this->qualifyColumn('created_at'), '<=', now()->subMinutes($minutes));
     }
 }
