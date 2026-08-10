@@ -68,7 +68,10 @@ class ProfileUpdateTest extends TestCase
             ->assertHasNoErrors()
             ->assertRedirect('/');
 
-        $this->assertNull($user->fresh());
+        // Operators are soft-deleted rather than erased, so the audit trail keeps pointing at
+        // a real user. The account must still be gone as far as the application is concerned.
+        $this->assertSoftDeleted($user);
+        $this->assertNull(User::query()->find($user->id));
         $this->assertFalse(auth()->check());
     }
 

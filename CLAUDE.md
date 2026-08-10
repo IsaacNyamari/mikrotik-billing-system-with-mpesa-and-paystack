@@ -48,13 +48,34 @@ identity.
 
 Single shared database, `tenant_id` column on every tenant-owned table, enforced by a global scope.
 
-- Tenant-owned models use the `BelongsToTenant` trait, which adds the global scope and auto-fills
-  `tenant_id` on create.
-- The current tenant lives in `TenantContext` (a singleton), resolved from the authenticated user.
-- Bypassing the scope requires an explicit, deliberate call — never an accident.
+- Tenant-owned models use `App\Models\Concerns\BelongsToTenant`, which adds the global scope,
+  auto-fills `tenant_id` on create, and refuses cross-tenant reads, writes and deletes.
+- The current tenant lives in `App\Support\Tenancy\TenantContext` (a singleton), reached through
+  the `Tenancy` facade and resolved from the authenticated user by the `ResolveTenant` middleware.
+- **Strict scoping is on** (`config/tenancy.php`). Touching a tenant-owned model with no tenant
+  resolved throws `TenantContextMissingException` rather than quietly spanning every ISP. Console
+  commands, seeders and platform screens must say what they mean:
+  - `Tenancy::forTenant($tenant, fn () => ...)` — act as one ISP.
+  - `Tenancy::withoutScope(fn () => ...)` — deliberately span all ISPs.
 - Platform super admins have `tenant_id = null` and are the only identity allowed to cross tenants.
+  They start unscoped and switch into an ISP through the session.
+- `User` is deliberately **not** globally scoped: Fortify looks a user up by email before any
+  tenant is known. Use `User::query()->ofTenant($id)` on listing screens.
 - RADIUS requests are attributed to a tenant through the registered router/NAS mapping.
 - Reports, exports and dashboards enforce isolation too, not just CRUD screens.
+
+Never add `WithoutModelEvents` to a seeder — tenant stamping and UUID generation both ride on
+model events, so suppressing them seeds rows that could not exist at runtime.
+
+## Authorization
+
+- `App\Support\Authorization\Permissions` is the permission catalogue and the single source of
+  truth. Every entry becomes a gate ability at boot, so `$user->can('routers.provision')` works.
+  Adding a capability means adding it there and reseeding — never inserting a row by hand.
+- `App\Support\Authorization\Roles` defines the seven roles from the specification. Platform roles
+  carry `tenant_id = null` and are shared by every ISP; a tenant may define extra roles of its own.
+- A super admin passes every gate via `Gate::before`. A deactivated user passes none, whatever
+  their roles say.
 
 ## Hard rules
 
@@ -81,7 +102,7 @@ Built one phase at a time, never all at once.
 | # | Deliverable | Status |
 |---|---|---|
 | 1 | Laravel foundation, environment, coding standards | done |
-| 2 | Multi-tenancy, users, roles and policies | in progress |
+| 2 | Multi-tenancy, users, roles and policies | done |
 | 3 | Customers and service accounts | |
 | 4 | Plans and subscription lifecycle | |
 | 5 | Invoices and billing | |
