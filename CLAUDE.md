@@ -266,7 +266,7 @@ plans and billing, because the MikroTik integration is what the rest hangs off.
 | 10 | Subscriptions, invoices and renewals | |
 | 11 | Vouchers | |
 | 12 | Monitoring and operational dashboards | |
-| 13 | Reports and earnings analytics | |
+| 13 | Reports and earnings analytics | done |
 | 14 | WireGuard management network | |
 | 15 | Security review and audit | |
 | 16 | Production deployment | |
