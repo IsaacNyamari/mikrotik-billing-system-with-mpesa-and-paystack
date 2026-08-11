@@ -12,6 +12,15 @@ PHP="${PHP:-/usr/bin/php}"
 
 cd "$APP_DIR"
 
+echo "==> Storage skeleton"
+# Excluded from the transfer because it is one machine's scratch space, so the server builds
+# its own. Without these, composer's post-autoload step fails with "please provide a valid
+# cache path" — which says nothing about the actual cause.
+mkdir -p storage/framework/{cache/data,sessions,views,testing} \
+         storage/logs \
+         storage/app/{public,private} \
+         bootstrap/cache
+
 echo "==> Dependencies"
 composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
 
@@ -40,9 +49,16 @@ $PHP artisan view:cache
 $PHP artisan event:cache
 
 echo "==> Permissions"
-# The web user writes to exactly two trees and must own neither the code nor the .env.
-chown -R www-data:www-data storage bootstrap/cache public/storage 2>/dev/null || true
+# The web user writes to exactly two trees and owns neither the code nor the .env, so a
+# compromised worker cannot rewrite the application it is running.
+chown -R root:www-data "$APP_DIR"
+chown -R www-data:www-data storage bootstrap/cache
 chmod -R ug+rwX storage bootstrap/cache
+chmod 640 .env 2>/dev/null || true
+
+# nginx serves public/ as www-data and must be able to traverse it.
+find public -type d -exec chmod 2755 {} \;
+find public -type f -exec chmod 644 {} \;
 
 echo "==> Restart"
 systemctl restart php8.3-fpm 2>/dev/null || systemctl restart php-fpm 2>/dev/null || true
