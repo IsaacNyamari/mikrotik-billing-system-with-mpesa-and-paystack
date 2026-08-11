@@ -1,5 +1,25 @@
 # Pointing a MikroTik HotSpot at the portal
 
+## The short version
+
+One command does the router side:
+
+```bash
+php artisan hotspot:install-portal --url=http://192.168.0.100:8000 --hotspot-dns=wifi.my-isp
+```
+
+It opens the walled garden, pulls `login.html` and `alogin.html` onto the device, points the
+HotSpot profile at them with `http-pap` enabled, and names the HotSpot. Re-running is harmless.
+
+`--hotspot-dns` is worth setting. Without it RouterOS hands clients `link-login-only=http://10.10.10.1/login`
+and the browser shows a bare address; with it the HotSpot answers to a name, which RouterOS
+registers in its own DNS automatically.
+
+`--dns-ip=<address>` does the same trick for the *portal* host, so the URL baked into the login
+page survives the machine's DHCP lease changing.
+
+The sections below explain what each step does, for when something needs unpicking by hand.
+
 What has to be done on the router itself before customers can buy access. The platform provisions
 users onto an existing HotSpot; it does not create the HotSpot, the pool or the DHCP server.
 

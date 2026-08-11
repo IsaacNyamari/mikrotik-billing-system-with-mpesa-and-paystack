@@ -25,7 +25,9 @@ class HotspotInstallPortalCommand extends Command
     protected $signature = 'hotspot:install-portal
         {router? : Router slug. Omit when the ISP has one.}
         {--tenant= : ISP slug. Required when more than one exists.}
-        {--url= : Base URL the router should fetch from. Defaults to APP_URL.}';
+        {--url= : Base URL the router should fetch from. Defaults to APP_URL.}
+        {--dns-ip= : Resolve the portal hostname to this address on the router itself.}
+        {--hotspot-dns= : Give the HotSpot itself a name, e.g. wifi.my-isp, instead of a bare IP.}';
 
     protected $description = 'Install the captive portal redirect and walled garden onto a router';
 
@@ -69,6 +71,14 @@ class HotspotInstallPortalCommand extends Command
 
             $rows = [];
 
+            // 0. A hostname is worth more than an address here: the portal URL is written into
+            //    the router's login page, so pinning it to a DHCP-assigned laptop address means
+            //    everything breaks the next time that lease changes. The router already answers
+            //    DNS for HotSpot clients, so one static entry keeps the name pointing home.
+            if ($this->option('dns-ip') !== null) {
+                $rows[] = ["DNS {$host}", $this->resolveHostOnRouter($connection, $host, (string) $this->option('dns-ip'))];
+            }
+
             // 1. An unauthenticated phone can reach nothing until the walled garden allows it,
             //    so without this the redirect lands on a page that will not load.
             $rows[] = ['Walled garden', $this->allowThrough($connection, $host)];
@@ -86,7 +96,8 @@ class HotspotInstallPortalCommand extends Command
                 $rows[] = ["hotspot/{$page}", $this->fetch($connection, $url, "hotspot/{$page}")];
             }
 
-            // 3. Point the HotSpot server profile at that directory.
+            // 3. Point the HotSpot server profile at that directory, and optionally give the
+            //    HotSpot a name of its own.
             $rows[] = ['HotSpot profile', $this->pointProfileAtDirectory($connection)];
 
             $connection->disconnect();
@@ -103,6 +114,43 @@ class HotspotInstallPortalCommand extends Command
 
             return self::SUCCESS;
         });
+    }
+
+    /**
+     * Point a hostname at an address in the router's own DNS.
+     *
+     * HotSpot clients have their DNS redirected to the router whatever resolver they were
+     * handed, so a static entry here is what every phone on the network will see.
+     */
+    protected function resolveHostOnRouter(RouterOsConnection $connection, string $host, string $address): string
+    {
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return '<fg=yellow>skipped — the URL is already an address</>';
+        }
+
+        if (! filter_var($address, FILTER_VALIDATE_IP)) {
+            return "<fg=red>{$address} is not an IP address</>";
+        }
+
+        try {
+            $existing = $connection->first('/ip/dns/static', ['name' => $host]);
+
+            if ($existing !== null) {
+                $connection->update('/ip/dns/static', $existing['.id'], ['address' => $address]);
+
+                return "<fg=green>updated → {$address}</>";
+            }
+
+            $connection->add('/ip/dns/static', [
+                'name' => $host,
+                'address' => $address,
+                'comment' => 'ISP billing portal',
+            ]);
+
+            return "<fg=green>added → {$address}</>";
+        } catch (Throwable $e) {
+            return '<fg=red>'.$e->getMessage().'</>';
+        }
     }
 
     protected function allowThrough(RouterOsConnection $connection, string $host): string
@@ -164,13 +212,25 @@ class HotspotInstallPortalCommand extends Command
                 return '<fg=red>profile '.$profileName.' not found</>';
             }
 
-            $connection->update('/ip/hotspot/profile', $profile['.id'], [
+            $attributes = [
                 'html-directory' => 'hotspot',
                 // The portal posts a plain username and password, so PAP has to be on the list.
                 'login-by' => 'http-chap,http-pap',
-            ]);
+            ];
 
-            return '<fg=green>'.$profileName.' → hotspot/</>';
+            $dnsName = $this->option('hotspot-dns');
+
+            if ($dnsName !== null) {
+                // With a dns-name set, RouterOS serves the HotSpot under that name and hands
+                // it to clients as link-login-only, instead of a bare 10.10.10.1. It also
+                // registers the name in its own DNS, so phones on the HotSpot resolve it.
+                $attributes['dns-name'] = $dnsName;
+            }
+
+            $connection->update('/ip/hotspot/profile', $profile['.id'], $attributes);
+
+            return '<fg=green>'.$profileName.' → hotspot/'
+                .($dnsName !== null ? ", dns-name={$dnsName}" : '').'</>';
         } catch (Throwable $e) {
             return '<fg=red>'.$e->getMessage().'</>';
         }
