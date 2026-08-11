@@ -81,7 +81,13 @@ class HotspotInstallPortalCommand extends Command
 
             // 1. An unauthenticated phone can reach nothing until the walled garden allows it,
             //    so without this the redirect lands on a page that will not load.
-            $rows[] = ['Walled garden', $this->allowThrough($connection, $host)];
+            $rows[] = ['Walled garden (HTTP)', $this->allowThrough($connection, $host)];
+
+            // RouterOS has two walled gardens and they are not interchangeable. The one above
+            // is applied by the HotSpot's HTTP proxy, so it only ever covers port 80. A portal
+            // served on any other port — 8000 in development — is rejected outright unless it
+            // is also allowed at the IP level.
+            $rows[] = ['Walled garden (IP)', $this->allowAddressThrough($connection, $base)];
 
             // Safaricom's endpoints too, or the STK push confirmation cannot come back to a
             // customer who is still sitting unauthenticated on the portal.
@@ -148,6 +154,45 @@ class HotspotInstallPortalCommand extends Command
             ]);
 
             return "<fg=green>added → {$address}</>";
+        } catch (Throwable $e) {
+            return '<fg=red>'.$e->getMessage().'</>';
+        }
+    }
+
+    /**
+     * Allow the portal through at the IP level, which is the only walled garden that applies
+     * to a port the HotSpot does not proxy.
+     */
+    protected function allowAddressThrough(RouterOsConnection $connection, string $base): string
+    {
+        $host = (string) parse_url($base, PHP_URL_HOST);
+        $port = parse_url($base, PHP_URL_PORT) ?: (str_starts_with($base, 'https') ? 443 : 80);
+
+        // The rule needs an address, so a hostname has to be resolved to one first.
+        $address = filter_var($host, FILTER_VALIDATE_IP)
+            ? $host
+            : (string) ($this->option('dns-ip') ?: gethostbyname($host));
+
+        if (! filter_var($address, FILTER_VALIDATE_IP)) {
+            return "<fg=red>could not resolve {$host} — pass --dns-ip</>";
+        }
+
+        try {
+            $existing = $connection->first('/ip/hotspot/walled-garden/ip', ['dst-address' => $address]);
+
+            if ($existing !== null) {
+                return "<fg=yellow>already allowed ({$address})</>";
+            }
+
+            $connection->add('/ip/hotspot/walled-garden/ip', [
+                'action' => 'accept',
+                'dst-address' => $address,
+                'protocol' => 'tcp',
+                'dst-port' => (string) $port,
+                'comment' => 'ISP billing portal',
+            ]);
+
+            return "<fg=green>allowed {$address}:{$port}</>";
         } catch (Throwable $e) {
             return '<fg=red>'.$e->getMessage().'</>';
         }
