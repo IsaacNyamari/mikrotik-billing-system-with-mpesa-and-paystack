@@ -3,6 +3,7 @@
 namespace App\Services\Provisioning;
 
 use App\Models\Router;
+use App\Support\PublicUrl;
 use Illuminate\Support\Str;
 
 /**
@@ -300,11 +301,20 @@ class RouterSetupScript
 
     protected function banner(Router $router, string $portalHost): string
     {
+        // A script generated from a laptop points the router at that laptop. It is the right
+        // thing while testing on the same wifi and useless in a shop, and the difference is
+        // invisible once the script has been copied somewhere else — so it says so in itself.
+        $warning = PublicUrl::isReachableByCustomers((string) config('app.url'))
+            ? ''
+            : "\n#  ⚠ WARNING: {$portalHost} is only reachable from one network. Customers\n".
+              "#    on this router will not be able to open the payment page. Generate\n".
+              "#    this script from the live platform instead.\n#";
+
         return <<<SCRIPT
         # =====================================================================
         #  {$router->name}
         #  Setup for {$portalHost}
-        #
+        #{$warning}
         #  Paste this whole block into the router's terminal (Winbox > New
         #  Terminal, or SSH). It is safe to run more than once.
         #
@@ -391,9 +401,15 @@ class RouterSetupScript
         /user remove [find name="{$user}"]
         /user/group remove [find name="{$group}"]
 
+        # ftp is in here for one reason: RouterOS ties file writing to it, and /tool/fetch is
+        # how the captive-portal login page gets onto the device. Without it the portal
+        # install fails with "cannot open file: permission denied" — verified on hardware.
+        #
+        # policy is deliberately left out. It would let this account create users with any
+        # rights at all, which is the whole of the device rather than the part we need.
         /user/group
-        add name="{$group}" policy=read,write,test,api,sensitive \\
-            comment="Platform provisioning: user management and HotSpot only"
+        add name="{$group}" policy=read,write,test,api,sensitive,ftp \\
+            comment="Platform provisioning: HotSpot users and portal files"
 
         /user
         add name="{$user}" password="{$password}" group="{$group}" \\

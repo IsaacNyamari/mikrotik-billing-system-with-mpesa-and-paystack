@@ -76,6 +76,34 @@ class RouterSetupScriptTest extends TestCase
     }
 
     #[Test]
+    public function the_api_user_can_write_the_portal_pages_but_not_make_itself_an_admin(): void
+    {
+        $script = $this->script();
+
+        // RouterOS ties file writing to the ftp policy, and /tool/fetch is how the captive
+        // portal's login page reaches the device. Without it the portal install fails with
+        // "cannot open file: permission denied" — found on real hardware, not in theory.
+        $this->assertMatchesRegularExpression('/policy=[a-z,]*\bftp\b/', $script);
+
+        // But not "policy", which would let this account create users with any rights at all.
+        $this->assertDoesNotMatchRegularExpression('/policy=[a-z,]*\bpolicy\b/', $script);
+    }
+
+    #[Test]
+    public function a_script_generated_from_a_developer_machine_says_so(): void
+    {
+        config(['app.url' => 'http://192.168.0.100:8000']);
+
+        // The difference between a laptop and the live platform is invisible once the script
+        // has been copied somewhere else, so it has to be written into the script itself.
+        $this->assertStringContainsString('WARNING', app(RouterSetupScript::class)->for($this->router));
+
+        config(['app.url' => 'https://isp.solforbs.com']);
+
+        $this->assertStringNotContainsString('WARNING', app(RouterSetupScript::class)->for($this->router));
+    }
+
+    #[Test]
     public function the_platform_starts_talking_to_the_router_over_the_tunnel(): void
     {
         $this->script();
