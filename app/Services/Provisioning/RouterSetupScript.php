@@ -280,14 +280,28 @@ class RouterSetupScript
     }
 
     /**
-     * A fresh single-use link for this router to fetch its configuration from.
+     * The single-use link this router fetches its configuration from.
      *
-     * Reissued every time a wipe script is generated, which also invalidates the previous one:
-     * a link that was copied into a chat message stops working the moment a new script is
-     * made.
+     * **Reused while it is still good.** Minting a fresh one on every call looks harmless and
+     * is not: the setup screen regenerates the script on every render, so an operator who
+     * copied a script, walked to the router and pasted it found the link already dead —
+     * killed by their own page re-rendering behind them. Observed in production, as a router
+     * asking for a token the database had replaced eight minutes earlier.
+     *
+     * A new one is issued only when there is none, when the last has expired, or when it has
+     * already been spent. Rotating the router's keys clears it deliberately.
      */
     protected function issueProvisionToken(Router $router): string
     {
+        // Read fresh rather than trusting the instance in hand: the router is spent by a
+        // different request — the device's own download — so an in-memory copy made before
+        // that would happily hand out a token the router has already used.
+        $router->refresh();
+
+        if ($router->provisionTokenIsUsable()) {
+            return (string) $router->provision_token;
+        }
+
         $token = Str::random(48);
 
         $router->provision_token = $token;

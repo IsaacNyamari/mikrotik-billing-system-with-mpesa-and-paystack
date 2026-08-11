@@ -165,16 +165,36 @@ class WipeAndRebuildTest extends TestCase
     }
 
     #[Test]
-    public function generating_a_new_script_invalidates_the_old_link(): void
+    public function regenerating_the_script_keeps_the_link_the_operator_copied(): void
     {
         $this->wipeScript();
         $first = $this->router->fresh()->provision_token;
 
+        // The setup screen rebuilds the script on every render. Minting a fresh token each
+        // time killed the link the operator had already copied — found in production, as a
+        // router asking for a token the database had replaced minutes earlier while its owner
+        // was walking to the device.
+        $this->wipeScript();
         $this->wipeScript();
 
-        // A link copied into a chat message stops working the moment another script is made.
-        $this->assertNotSame($first, $this->router->fresh()->provision_token);
-        $this->get(route('routers.provision-script', ['token' => $first]))->assertNotFound();
+        $this->assertSame($first, $this->router->fresh()->provision_token);
+        $this->get(route('routers.provision-script', ['token' => $first]))->assertOk();
+    }
+
+    #[Test]
+    public function a_spent_link_is_replaced_rather_than_reused(): void
+    {
+        $this->wipeScript();
+        $spent = $this->router->fresh()->provision_token;
+
+        $this->get(route('routers.provision-script', ['token' => $spent]))->assertOk();
+
+        // Single-use, as the specification requires — so the next script has to carry a new
+        // one or it would be born broken.
+        $this->wipeScript();
+
+        $this->assertNotSame($spent, $this->router->fresh()->provision_token);
+        $this->get(route('routers.provision-script', ['token' => $this->router->fresh()->provision_token]))->assertOk();
     }
 
     #[Test]

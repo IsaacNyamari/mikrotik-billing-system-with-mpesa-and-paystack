@@ -82,6 +82,57 @@ new #[Title('Router setup')] class extends Component {
         return app(WireGuardPeerSync::class)->isAvailable();
     }
 
+    /**
+     * Where the one-time download link stands, for the wipe script that depends on it.
+     *
+     * Worth showing rather than leaving to be discovered: a spent or expired link fails on the
+     * router with a bare 404, at the point where the operator is standing over a device they
+     * are about to erase.
+     */
+    #[Computed]
+    public function linkState(): array
+    {
+        $router = $this->router;
+
+        if ($router->provision_token === null) {
+            return ['ok' => true, 'text' => __('A download link is created when you copy the script.')];
+        }
+
+        if ($router->provision_fetched_at !== null) {
+            return ['ok' => false, 'text' => __('This link has already been used, :when. Generate a new script before pasting it again.', [
+                'when' => $router->provision_fetched_at->diffForHumans(),
+            ])];
+        }
+
+        if ($router->provision_token_expires_at?->isPast()) {
+            return ['ok' => false, 'text' => __('This link expired :when. Generate a new script.', [
+                'when' => $router->provision_token_expires_at->diffForHumans(),
+            ])];
+        }
+
+        return ['ok' => true, 'text' => __('The download link works once and expires :when.', [
+            'when' => $router->provision_token_expires_at?->diffForHumans() ?? '—',
+        ])];
+    }
+
+    /**
+     * Throw the current download link away and mint another.
+     */
+    public function newLink(): void
+    {
+        Gate::authorize(Permissions::ROUTERS_PROVISION);
+
+        $router = $this->router;
+        $router->provision_token = null;
+        $router->provision_token_expires_at = null;
+        $router->provision_fetched_at = null;
+        $router->save();
+
+        unset($this->router, $this->script, $this->linkState);
+
+        Flux::toast(text: __('New link. Copy the script again — the old one no longer works.'));
+    }
+
     #[Computed]
     public function tunnelReady(): bool
     {
@@ -301,6 +352,20 @@ new #[Title('Router setup')] class extends Component {
                     {{ __('This carries the router\'s private key and its API password. Treat it like a password — do not forward it, and rotate below if it goes astray.') }}
                 </flux:callout.text>
             </flux:callout>
+
+            {{-- The wipe script depends on a one-time link, and a spent one fails on the
+                 router with a bare 404 — at the point where somebody is standing over a
+                 device they are about to erase. --}}
+            @if ($wipe)
+                <flux:callout :variant="$this->linkState['ok'] ? 'secondary' : 'danger'" icon="link">
+                    <flux:callout.text>{{ $this->linkState['text'] }}</flux:callout.text>
+                    @unless ($this->linkState['ok'])
+                        <x-slot name="actions">
+                            <flux:button size="sm" wire:click="newLink">{{ __('New link') }}</flux:button>
+                        </x-slot>
+                    @endunless
+                </flux:callout>
+            @endif
 
             <pre x-ref="script" class="max-h-[32rem] overflow-auto rounded-lg bg-zinc-950 p-4 text-xs leading-relaxed text-zinc-100 dark:bg-black"><code>{{ $this->script }}</code></pre>
         </flux:card>
