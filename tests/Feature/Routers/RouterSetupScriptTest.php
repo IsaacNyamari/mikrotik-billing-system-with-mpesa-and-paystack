@@ -125,6 +125,27 @@ class RouterSetupScriptTest extends TestCase
         // which to them is simply broken wifi.
         $this->assertStringContainsString('add dst-host="isp.solforbs.com" action=allow', $script);
         $this->assertStringContainsString('login-by=http-chap,http-pap', $script);
+
+        // The HotSpot's HTTP proxy walled garden only covers port 80, so an https portal
+        // needs the IP-level rule as well or it is refused outright.
+        $this->assertStringContainsString('/ip/hotspot/walled-garden/ip', $script);
+        $this->assertStringContainsString('comment="platform-portal"', $script);
+    }
+
+    #[Test]
+    public function the_router_is_given_the_login_page_that_hands_customers_to_the_portal(): void
+    {
+        $script = $this->script();
+
+        // Without it the router serves MikroTik's own page, asking for a username and
+        // password the customer has never been given.
+        $this->assertStringContainsString('dst-path=hotspot/login.html', $script);
+        $this->assertStringContainsString('dst-path=hotspot/alogin.html', $script);
+        $this->assertStringContainsString('html-directory=hotspot', $script);
+
+        // Carrying this router's own portal key, so a script copied from one device can never
+        // point another at the wrong ISP's packages.
+        $this->assertStringContainsString($this->router->portal_key, $script);
     }
 
     #[Test]

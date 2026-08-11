@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Portal;
 
+use App\Http\Controllers\HotspotPageController;
+use App\Models\PortalSetting;
 use App\Models\Router;
 use App\Models\Tenant;
 use App\Support\Tenancy\Facades\Tenancy;
@@ -63,9 +65,40 @@ class HotspotPageTest extends TestCase
     }
 
     #[Test]
-    public function only_the_two_known_pages_are_served(): void
+    public function every_page_the_router_serves_comes_from_the_platform(): void
     {
-        $this->get('/p/'.$this->router->portal_key.'/mikrotik/status.html')->assertNotFound();
+        // A device missing any of these falls back to MikroTik's own, which asks a customer
+        // for a username and password they have never been given.
+        foreach (array_keys(HotspotPageController::PAGES) as $page) {
+            $this->get('/p/'.$this->router->portal_key.'/mikrotik/'.$page)
+                ->assertOk()
+                ->assertHeader('content-type', 'text/html; charset=utf-8');
+        }
+    }
+
+    #[Test]
+    public function nothing_outside_that_set_is_served(): void
+    {
+        // The page name reaches the filesystem through a view lookup, so it is matched against
+        // a list rather than trusted.
+        $this->get('/p/'.$this->router->portal_key.'/mikrotik/passwd')->assertNotFound();
+        $this->get('/p/'.$this->router->portal_key.'/mikrotik/login.php')->assertNotFound();
+    }
+
+    #[Test]
+    public function the_pages_carry_the_isps_own_branding(): void
+    {
+        PortalSetting::query()->create([
+            'brand_name' => 'Kawangware Wifi',
+            'primary_color' => '#e11d48',
+        ]);
+
+        // Baked in when the router fetches them: these files live on the device, so an ISP who
+        // rebrands re-runs the setup to see it here.
+        $this->get('/p/'.$this->router->portal_key.'/mikrotik/status.html')
+            ->assertOk()
+            ->assertSee('Kawangware Wifi')
+            ->assertSee('#e11d48', escape: false);
     }
 
     #[Test]

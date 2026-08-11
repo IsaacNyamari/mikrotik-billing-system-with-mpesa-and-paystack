@@ -2,6 +2,7 @@
 
 namespace App\Services\Provisioning;
 
+use App\Http\Controllers\HotspotPageController;
 use App\Models\Router;
 use App\Support\PublicUrl;
 use Illuminate\Support\Str;
@@ -448,6 +449,15 @@ class RouterSetupScript
         $mask = $this->maskBits($network);
         $profile = $hotspot.'-profile';
 
+        // The pages the router will serve, each carrying this router's own portal key — so a
+        // script copied from one device can never point another at the wrong ISP's packages.
+        // Indented to sit under the block each is written into, so the pasted script reads as
+        // one thing rather than a wall that falls out of alignment halfway down.
+        $pageFetches = $this->pageFetches($router, 'hotspot', '        ');
+        $flashFetches = $this->pageFetches($router, 'flash/hotspot', '            ');
+        $portalAddress = $this->resolve($portalHost);
+        $timezone = $this->timezone((string) $router->tenant->timezone);
+
         return <<<SCRIPT
 
         # ---------------------------------------------------------------------
@@ -514,16 +524,68 @@ class RouterSetupScript
         # The walled garden is what lets a customer who has paid nothing reach
         # the page where they pay. Without it they are redirected to a portal
         # they cannot load, which looks to them like broken wifi.
-        #
-        # dst-host covers both ports, so one entry is enough.
         /ip/hotspot/walled-garden
         remove [find comment="platform-portal"]
         add dst-host="{$portalHost}" action=allow comment="platform-portal"
+
+        # RouterOS has two walled gardens and they are not interchangeable. The
+        # one above belongs to the HotSpot's HTTP proxy, so it only ever covers
+        # port 80 — an https portal is refused outright unless it is also
+        # allowed at the IP level. {$portalHost} resolved to this when the
+        # script was made; regenerate it if the platform ever moves.
+        /ip/hotspot/walled-garden/ip
+        remove [find comment="platform-portal"]
+        add dst-address={$portalAddress} action=accept comment="platform-portal"
 
         /ip/hotspot/walled-garden/ip
         remove [find comment="platform-dns"]
         add dst-address=1.1.1.1 action=accept comment="platform-dns"
         add dst-address=8.8.8.8 action=accept comment="platform-dns"
+
+        # The provider's own domains, or a payment confirmation cannot reach a
+        # customer still sitting unauthenticated on the portal.
+        /ip/hotspot/walled-garden
+        remove [find comment="platform-providers"]
+        add dst-host="*.safaricom.co.ke" action=allow comment="platform-providers"
+        add dst-host="*.paystack.co" action=allow comment="platform-providers"
+
+        # Fasttrack sends established connections straight past the firewall —
+        # and past the HotSpot with them. Leaving it in place is how a router
+        # ends up letting customers online without a login and reporting no
+        # usage for anyone.
+        /ip/firewall/filter
+        remove [find action=fasttrack-connection]
+
+        # ---------------------------------------------------------------------
+        # 3b. The login page
+        #
+        # Without this the router serves MikroTik's own page, which asks for a
+        # username and password the customer has never been given. This one
+        # simply hands them to the portal.
+        #
+        # Fetched here rather than pushed over the API afterwards, because this
+        # paste runs as an administrator: the platform's own account cannot
+        # write files unless it has been granted the ftp policy, and a router
+        # should be finished by the time this script ends.
+        # ---------------------------------------------------------------------
+
+        :put "Downloading the HotSpot pages…";
+
+        {$pageFetches}
+        # Boards with onboard flash serve from there, and a page written only to
+        # the volatile path is one that disappears at the next reboot.
+        :if ([:len [/file find name="flash"]] > 0) do={
+            :put "Copying them to flash…";
+            {$flashFetches}
+        }
+
+        /ip/hotspot/profile
+        set [find name="{$profile}"] html-directory=hotspot
+
+        # The device stamps its own logs and expiry times, so it should agree
+        # with the platform about what time it is.
+        /system/clock
+        set time-zone-name={$timezone}
         SCRIPT;
     }
 
@@ -566,6 +628,63 @@ class RouterSetupScript
         // Start clear of the gateway rather than immediately after it, so an operator has
         // room for a printer or an access point with a fixed address.
         return [$prefix.'.'.max(10, $gatewayHost + 9), $prefix.'.254'];
+    }
+
+    /**
+     * The fetch lines for every page the platform serves this router.
+     *
+     * One per page rather than a loop, because an operator watching a paste scroll past wants
+     * to see which file failed — and RouterOS carries on after a failed fetch, so a silent
+     * loop would leave a device half-configured with nothing to point at.
+     *
+     * The delay is not superstition: a board with slow flash drops fetches issued back to back.
+     */
+    protected function pageFetches(Router $router, string $directory, string $indent = ''): string
+    {
+        $lines = [];
+
+        foreach (array_keys(HotspotPageController::PAGES) as $page) {
+            $url = route('portal.mikrotik', ['portalKey' => $router->portal_key, 'page' => $page]);
+            $mode = str_starts_with($url, 'https://') ? 'https' : 'http';
+
+            $lines[] = '/tool/fetch url="'.$url.'" mode='.$mode.' dst-path='.$directory.'/'.$page.' check-certificate=no';
+            $lines[] = ':delay 2s;';
+        }
+
+        // The first line lands where the heredoc already put it, so only the rest are
+        // indented — a heredoc cannot start an interpolated block at column zero.
+        return implode("\n".$indent, $lines);
+    }
+
+    /**
+     * A timezone name RouterOS will accept.
+     *
+     * Not run through the general name sanitiser: that strips the slash, and "AfricaNairobi"
+     * is not a place.
+     */
+    protected function timezone(string $value): string
+    {
+        return preg_match('#^[A-Za-z]+/[A-Za-z_+\-0-9]+$#', $value) === 1 ? $value : 'Africa/Nairobi';
+    }
+
+    /**
+     * The platform's address, for the walled-garden rule that needs one.
+     *
+     * Resolved when the script is generated, because the router cannot be asked to do it: its
+     * DNS is answered by the HotSpot, which is the very thing being configured.
+     */
+    protected function resolve(string $host): string
+    {
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return $host;
+        }
+
+        $address = gethostbyname($host);
+
+        // gethostbyname hands back what it was given when it fails. Rather than write a
+        // hostname into a rule that needs an address — which RouterOS rejects — fall back to
+        // the whole internet on that comment, which the dst-host rule above already narrows.
+        return filter_var($address, FILTER_VALIDATE_IP) !== false ? $address : '0.0.0.0/0';
     }
 
     protected function maskBits(string $cidr): string

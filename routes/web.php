@@ -22,7 +22,7 @@ Route::livewire('p/{portalKey}', 'pages::portal.index')->name('portal');
 // Fetched by the router itself during hotspot:install-portal, then served from its own
 // storage to customers.
 Route::get('p/{portalKey}/mikrotik/{page}', HotspotPageController::class)
-    ->whereIn('page', ['login.html', 'alogin.html'])
+    ->whereIn('page', array_keys(HotspotPageController::PAGES))
     ->name('portal.mikrotik');
 
 // Safaricom posts here. The token in the path is the only credential; CSRF is exempted for it
