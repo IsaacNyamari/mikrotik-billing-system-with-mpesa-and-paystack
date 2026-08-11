@@ -3,6 +3,7 @@
 use App\Models\Router;
 use App\Services\RouterOs\Contracts\RouterOsConnector;
 use App\Services\RouterOs\RouterHealthProbe;
+use App\Support\Audit\AuditLogger;
 use Flux\Flux;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Computed;
@@ -17,6 +18,40 @@ new #[Title('Router')] class extends Component {
         Gate::authorize('view', $router);
 
         $this->router = $router;
+    }
+
+    /**
+     * Remove this router from the platform.
+     *
+     * A soft delete: the payments taken through it and the logins it issued are an ISP's
+     * business record, and cascading them away because a device was decommissioned would
+     * rewrite their earnings history.
+     *
+     * It deliberately does not reach for the device. A router is usually removed *because* it
+     * has gone — stolen, burnt out, taken back by a landlord — and a delete that hangs for
+     * thirty seconds waiting for a dead box before failing is a delete that does not work
+     * when it is most needed.
+     */
+    public function destroy(AuditLogger $audit): void
+    {
+        Gate::authorize('delete', $this->router);
+
+        $name = $this->router->name;
+
+        $audit->record(
+            event: 'router.deleted',
+            auditable: $this->router,
+            description: sprintf('Removed router %s', $name),
+        );
+
+        $this->router->delete();
+
+        Flux::toast(
+            variant: 'success',
+            text: __(':name has been removed. Its payment history is kept.', ['name' => $name]),
+        );
+
+        $this->redirectRoute('routers.index', navigate: true);
     }
 
     public function probe(RouterHealthProbe $probe): void
@@ -103,10 +138,35 @@ new #[Title('Router')] class extends Component {
                     </flux:button>
                 @endcan
 
+                @can('provision', $router)
+                    <flux:button icon="command-line" :href="route('routers.setup', $router)" wire:navigate>
+                        {{ __('Setup script') }}
+                    </flux:button>
+                @endcan
+
                 @can('update', $router)
                     <flux:button icon="pencil-square" :href="route('routers.edit', $router)" wire:navigate>
                         {{ __('Edit') }}
                     </flux:button>
+                @endcan
+
+                @can('delete', $router)
+                    <flux:dropdown position="bottom" align="end">
+                        <flux:button icon="ellipsis-horizontal" variant="ghost" />
+
+                        <flux:menu>
+                            <flux:menu.item
+                                icon="trash"
+                                variant="danger"
+                                wire:click="destroy"
+                                wire:confirm="{{ __('Remove :name from the platform?
+
+Its payments and earnings history are kept. The configuration already on the device is not touched — if it is still running, it will keep serving customers until you clear it.', ['name' => $router->name]) }}"
+                            >
+                                {{ __('Remove router') }}
+                            </flux:menu.item>
+                        </flux:menu>
+                    </flux:dropdown>
                 @endcan
             </div>
         </div>

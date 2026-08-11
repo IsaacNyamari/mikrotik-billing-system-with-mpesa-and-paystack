@@ -29,6 +29,11 @@ use Illuminate\Support\Str;
  * @property string $api_username
  * @property string $api_password
  * @property bool $uses_tls
+ * @property string|null $wg_private_key
+ * @property string|null $wg_public_key
+ * @property string|null $wg_address
+ * @property CarbonImmutable|null $wg_configured_at
+ * @property array<string, mixed>|null $setup_options
  * @property RouterStatus $status
  * @property string|null $last_error
  * @property CarbonImmutable|null $last_seen_at
@@ -97,7 +102,21 @@ class Router extends Model
             'uses_tls' => 'boolean',
             'last_seen_at' => 'datetime',
             'wg_configured_at' => 'datetime',
+            'setup_options' => 'array',
         ];
+    }
+
+    /**
+     * What the operator chose the last time a setup script was built for this router.
+     *
+     * Falls back to the platform defaults, so a router added before this was remembered still
+     * produces a sensible script.
+     *
+     * @return array<string, mixed>
+     */
+    public function setupOptions(): array
+    {
+        return array_merge((array) config('wireguard.defaults'), $this->setup_options ?? []);
     }
 
     /**

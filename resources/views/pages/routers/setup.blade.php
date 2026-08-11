@@ -32,7 +32,13 @@ new #[Title('Router setup')] class extends Component {
         Gate::authorize(Permissions::ROUTERS_PROVISION);
 
         $this->routerId = $router->id;
-        $this->lanInterface = (string) config('wireguard.defaults.lan_interface');
+
+        // What was chosen when this router was added, not the platform default — otherwise
+        // an operator returning to this page is handed a script that bridges the wrong port.
+        $options = $router->setupOptions();
+
+        $this->lanInterface = (string) $options['lan_interface'];
+        $this->withHotspot = (bool) ($options['with_hotspot'] ?? true);
     }
 
     #[Computed]

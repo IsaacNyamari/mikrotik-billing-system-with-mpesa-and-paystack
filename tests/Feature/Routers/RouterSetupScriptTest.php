@@ -228,8 +228,7 @@ class RouterSetupScriptTest extends TestCase
         $this->assertStringNotContainsString('group=full', $script);
 
         // And exactly one user is created — the platform's own.
-        $this->assertSame(1, substr_count($script, '/user
-remove'));
+        $this->assertSame(1, substr_count($script, 'add name="platform"'));
     }
 
     #[Test]

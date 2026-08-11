@@ -55,6 +55,13 @@ class RouterHealthProbe
             $router->model = $routerboard['model'] ?? $resource['board-name'] ?? null;
             $router->serial_number = $routerboard['serial-number'] ?? null;
 
+            // Reaching a router at its tunnel address is the only proof that the setup script
+            // was actually pasted and took. Stamped once: it is the answer to "did this ever
+            // work", which a later outage does not change.
+            if ($router->reachedOverTunnel() && $router->wg_configured_at === null) {
+                $router->wg_configured_at = now();
+            }
+
             $router->save();
 
             return $router;

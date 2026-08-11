@@ -32,7 +32,9 @@ class RouterSetupScript
     {
         $this->allocator->ensure($router);
 
-        $defaults = (array) config('wireguard.defaults');
+        // What was chosen last time, under the platform defaults. An operator who named
+        // wlan1 when adding the router must not come back to a script that bridges ether3.
+        $defaults = $router->setupOptions();
 
         $wgInterface = $this->name($options['interface_name'] ?? $defaults['interface_name']);
         $bridge = $this->name($options['bridge_name'] ?? $defaults['bridge_name']);
@@ -55,6 +57,21 @@ class RouterSetupScript
         // the moment this runs, which is the point: a script that leaked is revoked by
         // generating another.
         $apiPassword = $options['api_password'] ?? Str::password(24, symbols: false);
+
+        // Remembered so the next visit to this page produces the same script rather than the
+        // defaults, and so an operator can regenerate one without re-answering.
+        $router->setup_options = [
+            'lan_interface' => $lan,
+            'with_hotspot' => $withHotspot,
+            'interface_name' => $wgInterface,
+            'bridge_name' => $bridge,
+            'hotspot_name' => $hotspot,
+            'pool_name' => $pool,
+            'hotspot_network' => $network,
+            'hotspot_gateway' => $gateway,
+            'api_username' => $apiUser,
+            'api_group' => $apiGroup,
+        ];
 
         $router->api_username = $apiUser;
         $router->api_password = $apiPassword;
@@ -123,12 +140,16 @@ class RouterSetupScript
         # talking to us.
         # ---------------------------------------------------------------------
 
+        # The peer goes before the interface it belongs to is removed, for the same reason
+        # as everywhere else here: RouterOS will not remove something still referenced.
+        /interface/wireguard/peers remove [find comment="Platform management server"]
+        /ip/address remove [find comment="Management address"]
+        /interface/wireguard remove [find name="{$interface}"]
+
         /interface/wireguard
-        remove [find name="{$interface}"]
         add name="{$interface}" private-key="{$router->wg_private_key}" comment="Managed by the platform"
 
         /interface/wireguard/peers
-        remove [find interface="{$interface}"]
         add interface="{$interface}" \\
             public-key="{$serverKey}" \\
             endpoint-address={$endpoint} \\
@@ -138,7 +159,6 @@ class RouterSetupScript
             comment="Platform management server"
 
         /ip/address
-        remove [find interface="{$interface}"]
         add address={$address}/{$mask} interface="{$interface}" comment="Management address"
         SCRIPT;
     }
@@ -166,13 +186,15 @@ class RouterSetupScript
         # of password strength makes that a good idea.
         # ---------------------------------------------------------------------
 
+        # The user is removed before the group it belongs to, or RouterOS refuses the group.
+        /user remove [find name="{$user}"]
+        /user/group remove [find name="{$group}"]
+
         /user/group
-        remove [find name="{$group}"]
         add name="{$group}" policy=read,write,test,api,sensitive \\
             comment="Platform provisioning: user management and HotSpot only"
 
         /user
-        remove [find name="{$user}"]
         add name="{$user}" password="{$password}" group="{$group}" \\
             address={$subnet} comment="Platform. Do not remove."
 
@@ -223,14 +245,28 @@ class RouterSetupScript
         # each piece it would have built is created here explicitly.
         # ---------------------------------------------------------------------
 
-        /interface/bridge
-        add name="{$bridge}" comment="HotSpot" disabled=no
+        # Anything a previous run built is taken down first, in reverse dependency order.
+        # RouterOS refuses to remove a pool a DHCP server is still using, or a profile a
+        # HotSpot server still points at, so the order here is what makes a second run work
+        # rather than fail halfway and leave the network in pieces.
+        /ip/hotspot remove [find name="{$hotspot}"]
+        /ip/hotspot/profile remove [find name="{$profile}"]
+        /ip/dhcp-server remove [find name="dhcp-{$hotspot}"]
+        /ip/dhcp-server/network remove [find comment="platform-hotspot"]
+        /ip/pool remove [find name="{$pool}"]
+
+        # The bridge is created only when it is missing. Removing and rebuilding one is how
+        # a router whose uplink was named by mistake drops off the internet mid-script, and
+        # it would take the operator's own session with it.
+        :if ([:len [/interface/bridge find name="{$bridge}"]] = 0) do={
+            /interface/bridge add name="{$bridge}" comment="HotSpot"
+        }
+
         /interface/bridge/port
         remove [find interface="{$lan}"]
         add bridge="{$bridge}" interface="{$lan}"
 
         /ip/pool
-        remove [find name="{$pool}"]
         add name="{$pool}" ranges={$poolStart}-{$poolEnd}
 
         /ip/address
@@ -238,25 +274,23 @@ class RouterSetupScript
         add address={$gateway}/{$mask} interface="{$bridge}" comment="HotSpot gateway"
 
         /ip/dhcp-server
-        remove [find name="dhcp-{$hotspot}"]
         add name="dhcp-{$hotspot}" interface="{$bridge}" address-pool="{$pool}" \\
             lease-time=1h disabled=no
         /ip/dhcp-server/network
-        remove [find address="{$network}"]
-        add address={$network} gateway={$gateway} dns-server={$gateway} comment="HotSpot"
+        add address={$network} gateway={$gateway} dns-server={$gateway} comment="platform-hotspot"
 
+        # The router answers DNS for its own HotSpot clients, which is what makes the
+        # captive-portal redirect possible in the first place.
         /ip/dns
         set allow-remote-requests=yes servers=1.1.1.1,8.8.8.8
 
         # login-by=http-chap,http-pap because the portal posts the credentials
         # as plain fields once payment clears — the customer never types them.
         /ip/hotspot/profile
-        remove [find name="{$profile}"]
         add name="{$profile}" hotspot-address={$gateway} \\
             login-by=http-chap,http-pap use-radius=no
 
         /ip/hotspot
-        remove [find name="{$hotspot}"]
         add name="{$hotspot}" interface="{$bridge}" address-pool="{$pool}" \\
             profile="{$profile}" addresses-per-mac=2 disabled=no
 
