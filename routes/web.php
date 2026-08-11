@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\HotspotPageController;
 use App\Http\Controllers\MpesaCallbackController;
+use App\Http\Controllers\PaystackWebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
@@ -19,6 +20,10 @@ Route::get('p/{portalKey}/mikrotik/{page}', HotspotPageController::class)
 // Safaricom posts here. The token in the path is the only credential; CSRF is exempted for it
 // in bootstrap/app.php.
 Route::post('webhooks/mpesa/{token}', MpesaCallbackController::class)->name('webhooks.mpesa');
+
+// Paystack signs every webhook, so this one needs no secret in its path — the signature is
+// checked against the paying ISP's own key.
+Route::post('webhooks/paystack', PaystackWebhookController::class)->name('webhooks.paystack');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('dashboard', 'pages::dashboard')->name('dashboard');

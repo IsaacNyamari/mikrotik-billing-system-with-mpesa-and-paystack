@@ -108,6 +108,10 @@ class HotspotPageTest extends TestCase
         $this->artisan('hotspot:install-portal', ['--url' => 'http://192.168.0.100:8000']);
         $this->artisan('hotspot:install-portal', ['--url' => 'http://192.168.0.100:8000']);
 
-        $this->assertCount(2, $device->rows('/ip/hotspot/walled-garden'));
+        // Counting rows would only pin down how many hosts we happen to allow today. What
+        // matters is that running it again adds nothing.
+        $hosts = collect($device->rows('/ip/hotspot/walled-garden'))->pluck('dst-host');
+
+        $this->assertSame($hosts->count(), $hosts->unique()->count());
     }
 }

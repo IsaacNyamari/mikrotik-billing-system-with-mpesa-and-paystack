@@ -32,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // The unguessable token in the URL is what authenticates the request instead.
         $middleware->validateCsrfTokens(except: [
             'webhooks/mpesa/*',
+            'webhooks/paystack',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

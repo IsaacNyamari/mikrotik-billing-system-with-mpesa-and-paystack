@@ -1,7 +1,11 @@
 <?php
 
+use App\Enums\PaymentProvider;
 use App\Models\MpesaConfiguration;
+use App\Models\PaystackConfiguration;
+use App\Services\Payments\PaymentGatewayManager;
 use App\Support\Audit\AuditLogger;
+use App\Support\Tenancy\Facades\Tenancy;
 use App\Support\Authorization\Permissions;
 use Flux\Flux;
 use Illuminate\Support\Facades\Gate;
@@ -10,7 +14,15 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
-new #[Title('M-PESA settings')] class extends Component {
+new #[Title('Payments')] class extends Component {
+    /** Which provider takes this ISP's money. */
+    public string $provider = 'mpesa';
+
+    // Paystack, for an ISP with no Daraja app of its own.
+    public string $paystack_secret_key = '';
+    public string $paystack_public_key = '';
+    public string $paystack_receipt_domain = '';
+
     public string $environment = 'sandbox';
     public string $short_code = '';
     public string $party_b = '';
@@ -26,6 +38,18 @@ new #[Title('M-PESA settings')] class extends Component {
     public function mount(): void
     {
         Gate::authorize(Permissions::SETTINGS_MANAGE_PAYMENT_CREDENTIALS);
+
+        $this->provider = Tenancy::tenant()?->payment_provider
+            ?? (PaystackConfiguration::query()->exists() && ! MpesaConfiguration::query()->exists()
+                ? PaymentProvider::Paystack->value
+                : PaymentProvider::Mpesa->value);
+
+        $paystack = $this->paystack;
+
+        if ($paystack !== null) {
+            $this->paystack_public_key = (string) $paystack->public_key;
+            $this->paystack_receipt_domain = (string) $paystack->receipt_domain;
+        }
 
         $configuration = $this->configuration;
 
@@ -49,6 +73,94 @@ new #[Title('M-PESA settings')] class extends Component {
     public function configuration(): ?MpesaConfiguration
     {
         return MpesaConfiguration::query()->first();
+    }
+
+    #[Computed(persist: false)]
+    public function paystack(): ?PaystackConfiguration
+    {
+        return PaystackConfiguration::query()->first();
+    }
+
+    /**
+     * Which providers are ready to take money, so the screen can say plainly whether the one
+     * selected will actually work.
+     *
+     * @return array<string, bool>
+     */
+    #[Computed(persist: false)]
+    public function availability(): array
+    {
+        return app(PaymentGatewayManager::class)->availability();
+    }
+
+    /**
+     * Record which provider is live.
+     *
+     * Kept on the tenant rather than inferred from whichever credentials exist, so an ISP that
+     * has filled in both forms is in no doubt about which one customers are paying through.
+     */
+    public function chooseProvider(string $provider): void
+    {
+        Gate::authorize(Permissions::SETTINGS_MANAGE_PAYMENT_CREDENTIALS);
+
+        $chosen = PaymentProvider::tryFrom($provider);
+
+        if ($chosen === null) {
+            return;
+        }
+
+        $this->provider = $chosen->value;
+
+        $tenant = Tenancy::tenant();
+
+        if ($tenant !== null) {
+            $tenant->payment_provider = $chosen->value;
+            $tenant->save();
+        }
+
+        Flux::toast(text: __('Now collecting through :provider.', ['provider' => $chosen->label()]));
+    }
+
+    public function savePaystack(AuditLogger $audit): void
+    {
+        Gate::authorize(Permissions::SETTINGS_MANAGE_PAYMENT_CREDENTIALS);
+
+        $existing = $this->paystack;
+
+        $validated = $this->validate([
+            // Paystack encodes the mode in the key, so a test key cannot be mistaken for a
+            // live one.
+            'paystack_secret_key' => [$existing === null ? 'required' : 'nullable', 'string', 'regex:/^sk_(test|live)_[A-Za-z0-9]+$/'],
+            'paystack_public_key' => ['nullable', 'string', 'max:255'],
+            'paystack_receipt_domain' => ['nullable', 'string', 'max:255'],
+        ], [
+            'paystack_secret_key.regex' => __('That does not look like a Paystack secret key — they start sk_test_ or sk_live_.'),
+        ]);
+
+        $configuration = $existing ?? new PaystackConfiguration;
+
+        $configuration->fill([
+            'public_key' => $validated['paystack_public_key'] !== '' ? $validated['paystack_public_key'] : null,
+            'receipt_domain' => $validated['paystack_receipt_domain'] !== '' ? $validated['paystack_receipt_domain'] : null,
+            'is_active' => true,
+        ]);
+
+        if ($validated['paystack_secret_key'] !== '') {
+            $configuration->secret_key = $validated['paystack_secret_key'];
+        }
+
+        $configuration->save();
+
+        $this->reset('paystack_secret_key');
+        unset($this->paystack, $this->availability);
+
+        $audit->record(
+            event: 'paystack.configured',
+            auditable: $configuration,
+            description: __('Saved Paystack credentials'),
+        );
+
+        Flux::toast(variant: 'success', text: __('Paystack settings saved.'));
     }
 
     /**
@@ -114,11 +226,54 @@ new #[Title('M-PESA settings')] class extends Component {
 <section class="w-full">
     <div class="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
         <div>
-            <flux:heading size="xl">{{ __('M-PESA') }}</flux:heading>
-            <flux:subheading>
-                {{ __('Lipa na M-PESA credentials for collecting HotSpot payments into your own till.') }}
-            </flux:subheading>
+            <flux:heading size="xl">{{ __('Payments') }}</flux:heading>
+            <flux:subheading>{{ __('How customers pay you from the captive portal.') }}</flux:subheading>
         </div>
+
+        {{-- The choice comes first: an ISP with no Daraja app should see immediately that
+             there is a way forward, rather than reading a form they cannot fill in. --}}
+        <div class="grid gap-4 sm:grid-cols-2">
+            @foreach (PaymentProvider::cases() as $case)
+                @php($ready = $this->availability[$case->value] ?? false)
+                @php($chosen = $provider === $case->value)
+
+                <flux:card @class(['flex flex-col gap-3', 'ring-2 ring-blue-600/40' => $chosen])>
+                    <div class="flex items-start justify-between gap-3">
+                        <div>
+                            <flux:heading size="lg">{{ $case->label() }}</flux:heading>
+                            <flux:text size="sm" class="opacity-70">{{ $case->description() }}</flux:text>
+                        </div>
+
+                        @if ($chosen)
+                            <flux:badge size="sm" color="blue">{{ __('In use') }}</flux:badge>
+                        @endif
+                    </div>
+
+                    <div class="mt-auto flex items-center gap-2">
+                        <flux:badge size="sm" :color="$ready ? 'green' : 'zinc'">
+                            {{ $ready ? __('Ready') : __('Not set up') }}
+                        </flux:badge>
+
+                        @unless ($chosen)
+                            <flux:button size="sm" wire:click="chooseProvider('{{ $case->value }}')">
+                                {{ __('Use this') }}
+                            </flux:button>
+                        @endunless
+                    </div>
+                </flux:card>
+            @endforeach
+        </div>
+
+        @if (! ($this->availability[$provider] ?? false))
+            <flux:callout variant="warning" icon="exclamation-triangle">
+                <flux:callout.heading>{{ __('Customers cannot pay yet') }}</flux:callout.heading>
+                <flux:callout.text>
+                    {{ __('The provider you have chosen is not set up, so the portal tells customers to ask at the counter. Fill in its credentials below.') }}
+                </flux:callout.text>
+            </flux:callout>
+        @endif
+
+        <flux:separator :text="__('M-PESA (Daraja)')" />
 
         @if ($this->configuration)
             <flux:card class="flex flex-col gap-3">
@@ -221,6 +376,57 @@ new #[Title('M-PESA settings')] class extends Component {
             <div>
                 <flux:button variant="primary" type="submit" data-test="save-mpesa-button">
                     {{ __('Save settings') }}
+                </flux:button>
+            </div>
+        </form>
+
+        <flux:separator :text="__('Paystack')" />
+
+        <flux:callout icon="information-circle">
+            <flux:callout.heading>{{ __('No Daraja app? Use Paystack instead.') }}</flux:callout.heading>
+            <flux:callout.text>
+                {{ __('Paystack prompts the same M-PESA payment on the phone, with no Safaricom application of your own. It takes a cut and settles to your bank.') }}
+            </flux:callout.text>
+            <flux:callout.text>
+                {{ __('Set your webhook URL in the Paystack dashboard to:') }}
+                <span class="font-mono">{{ route('webhooks.paystack') }}</span>
+            </flux:callout.text>
+        </flux:callout>
+
+        <form wire:submit="savePaystack" class="flex flex-col gap-6">
+            @if ($this->paystack)
+                <flux:text size="sm" class="opacity-70">
+                    {{ __('A key is stored and is never shown again. Leave it blank to keep it.') }}
+                    @if ($this->paystack->isLive())
+                        <flux:badge size="sm" color="green" inset="top bottom">{{ __('live keys') }}</flux:badge>
+                    @else
+                        <flux:badge size="sm" color="amber" inset="top bottom">{{ __('test keys') }}</flux:badge>
+                    @endif
+                </flux:text>
+            @endif
+
+            <flux:input
+                wire:model="paystack_secret_key"
+                type="password"
+                :label="__('Secret key')"
+                :required="! $this->paystack"
+                autocomplete="off"
+                placeholder="sk_test_…"
+                :description="__('From Settings → API Keys in your Paystack dashboard.')"
+            />
+
+            <flux:input wire:model="paystack_public_key" :label="__('Public key')" placeholder="pk_test_…" />
+
+            <flux:input
+                wire:model="paystack_receipt_domain"
+                :label="__('Receipt email domain')"
+                placeholder="my-isp.co.ke"
+                :description="__('Paystack needs an email per payment. Walk-in customers only give a phone number, so one is made up against this domain.')"
+            />
+
+            <div>
+                <flux:button variant="primary" type="submit" data-test="save-paystack-button">
+                    {{ __('Save Paystack settings') }}
                 </flux:button>
             </div>
         </form>

@@ -232,6 +232,26 @@ pay from their phone, and are logged in without ever typing a username.
 - Phone numbers are normalised by `App\Support\PhoneNumber`, not by the gateway, so the stored
   number is comparable no matter how the customer typed it.
 
+### Two providers, one contract
+
+An ISP without a Daraja app can collect through **Paystack** instead. Both sit behind
+`App\Services\Payments\Contracts\PaymentGateway`, and `PaymentGatewayManager` picks the one
+the tenant chose (`tenants.payment_provider`), falling back to whichever is configured when they
+were never asked.
+
+- Paystack uses the **mobile-money charge**, not a hosted checkout. The customer is on a captive
+  portal, so a hosted page would need a walled-garden hole for every asset it loads. A charge
+  prompts the phone exactly as Daraja does, and the portal behaves identically either way.
+- Paystack **signs its webhooks**; Daraja does not. The signature is verified against the raw
+  body — re-encoding decoded JSON changes whitespace and key order, and it would never match.
+  Which ISP's key to check against comes from the payment the reference belongs to.
+- Paystack amounts are in the currency's smallest unit, so KES goes over as cents.
+- Paystack requires an email per charge and a walk-in has only given a phone, so one is derived
+  from the number against a configured domain.
+
+`DarajaPaymentGateway` is a thin adapter over the existing M-PESA code rather than a rewrite:
+that path is the one proven against a real Safaricom account.
+
 ### Credentials are per ISP, in the database
 
 Every tenant collects into its own till, so `mpesa_configurations` is tenant-owned: one row per

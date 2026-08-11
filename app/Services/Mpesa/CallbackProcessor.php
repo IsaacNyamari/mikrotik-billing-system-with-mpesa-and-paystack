@@ -67,22 +67,48 @@ class CallbackProcessor
     {
         $metadata = $this->metadata($payload);
 
-        DB::transaction(function () use ($payment, $payload, $metadata): void {
+        return $this->settle(
+            payment: $payment,
+            receipt: isset($metadata['MpesaReceiptNumber']) ? (string) $metadata['MpesaReceiptNumber'] : null,
+            amount: isset($metadata['Amount']) ? (string) $metadata['Amount'] : null,
+            phone: isset($metadata['PhoneNumber']) ? (string) $metadata['PhoneNumber'] : null,
+            description: isset($payload['ResultDesc']) ? (string) $payload['ResultDesc'] : null,
+            payload: $payload,
+        );
+    }
+
+    /**
+     * Mark a payment paid and hand the customer their access.
+     *
+     * Shared by every provider: whoever reported the money, what happens next is the same, and
+     * it is safe to run again because an already-settled payment never reaches here.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function settle(
+        Payment $payment,
+        ?string $receipt,
+        ?string $amount,
+        ?string $phone,
+        ?string $description,
+        array $payload,
+    ): Payment {
+        DB::transaction(function () use ($payment, $payload, $receipt, $amount, $phone, $description): void {
             $payment->status = PaymentStatus::Paid;
-            $payment->receipt = $metadata['MpesaReceiptNumber'] ?? null;
+            $payment->receipt = $receipt;
             $payment->result_code = 0;
-            $payment->result_description = $payload['ResultDesc'] ?? null;
+            $payment->result_description = $description;
             $payment->callback_payload = $payload;
             $payment->paid_at = now();
 
-            // Safaricom reports what was actually paid, which can differ from what was asked
+            // Providers report what was actually paid, which can differ from what was asked
             // for. The ISP's record should show the money that moved.
-            if (isset($metadata['Amount'])) {
-                $payment->amount = (string) $metadata['Amount'];
+            if ($amount !== null) {
+                $payment->amount = $amount;
             }
 
-            if (isset($metadata['PhoneNumber'])) {
-                $payment->phone = (string) $metadata['PhoneNumber'];
+            if ($phone !== null) {
+                $payment->phone = $phone;
             }
 
             $payment->save();
@@ -95,6 +121,23 @@ class CallbackProcessor
         );
 
         return $this->grantAccess($payment);
+    }
+
+    /**
+     * Record a failed attempt, whoever reported it.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function reject(Payment $payment, ?int $code, ?string $description, array $payload): Payment
+    {
+        $payment->status = PaymentStatus::Failed;
+        $payment->result_code = $code;
+        $payment->result_description = $description;
+        $payment->callback_payload = $payload;
+        $payment->failed_at = now();
+        $payment->save();
+
+        return $payment;
     }
 
     /**

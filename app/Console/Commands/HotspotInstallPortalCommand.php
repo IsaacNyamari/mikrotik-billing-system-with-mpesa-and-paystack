@@ -89,9 +89,10 @@ class HotspotInstallPortalCommand extends Command
             // is also allowed at the IP level.
             $rows[] = ['Walled garden (IP)', $this->allowAddressThrough($connection, $base)];
 
-            // Safaricom's endpoints too, or the STK push confirmation cannot come back to a
-            // customer who is still sitting unauthenticated on the portal.
+            // The payment providers too, or a confirmation cannot reach a customer who is
+            // still sitting unauthenticated on the portal.
             $rows[] = ['Walled garden (M-PESA)', $this->allowThrough($connection, '*.safaricom.co.ke')];
+            $rows[] = ['Walled garden (Paystack)', $this->allowThrough($connection, '*.paystack.co')];
 
             // 2. The login page itself. /file was empty on this device, which is exactly why
             //    no sign-in prompt appeared: the router had nothing to serve.

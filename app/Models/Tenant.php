@@ -26,6 +26,7 @@ use Illuminate\Support\Str;
  * @property string|null $address
  * @property string $timezone
  * @property string $currency
+ * @property string|null $payment_provider
  * @property array<string, mixed>|null $settings
  * @property CarbonImmutable|null $activated_at
  * @property CarbonImmutable|null $suspended_at
@@ -40,6 +41,7 @@ use Illuminate\Support\Str;
     'address',
     'timezone',
     'currency',
+    'payment_provider',
     'settings',
 ])]
 class Tenant extends Model
