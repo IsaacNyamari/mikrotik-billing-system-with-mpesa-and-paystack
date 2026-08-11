@@ -8,6 +8,7 @@ use App\Models\Plan;
 use App\Models\Router;
 use App\Services\Payments\PaymentGatewayManager;
 use App\Support\PhoneNumber;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -60,6 +61,16 @@ class PaymentCollector
             $payment->failed_at = now();
             $payment->callback_payload = $result->raw;
             $payment->save();
+
+            // The customer is shown a plain instruction rather than this, so without a log line
+            // the provider's actual complaint would only exist in a column nobody reads. It is
+            // the first thing an ISP needs when their portal stops selling.
+            Log::warning('Payment provider refused the charge', [
+                'payment' => $payment->id,
+                'provider' => $gateway->provider()->value,
+                'message' => $result->message,
+                'response' => $result->raw,
+            ]);
 
             return $payment;
         }

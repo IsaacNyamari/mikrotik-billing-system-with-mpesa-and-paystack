@@ -22,6 +22,9 @@ class FakeMpesaGateway implements MpesaGateway
 
     protected ?string $rejectWith = null;
 
+    /** @var array<string, mixed>|null */
+    protected ?array $queryAnswer = null;
+
     public function stkPush(
         MpesaConfiguration $configuration,
         string $phone,
@@ -51,11 +54,38 @@ class FakeMpesaGateway implements MpesaGateway
     }
 
     /**
+     * What Safaricom says when asked about a prompt.
+     *
+     * Defaults to what a real query returns while the customer is still deciding — an error
+     * rather than a status. Answering "paid" by default would quietly settle every payment in
+     * every test that happens to poll.
+     *
      * @return array<string, mixed>
      */
     public function query(MpesaConfiguration $configuration, string $checkoutRequestId): array
     {
-        return ['ResultCode' => '0', 'ResultDesc' => 'The service request is processed successfully.'];
+        return $this->queryAnswer ?? [
+            'errorCode' => '500.001.1001',
+            'errorMessage' => 'The transaction is being processed',
+        ];
+    }
+
+    /**
+     * Make the next query report an outcome.
+     *
+     * @param  array<string, mixed>|null  $answer
+     */
+    public function answerQueryWith(?array $answer): void
+    {
+        $this->queryAnswer = $answer;
+    }
+
+    /**
+     * As Safaricom reports a completed prompt: 0 for paid, 1032 for a customer who cancelled.
+     */
+    public function answerQueryWithCode(int $code, string $description = 'The service request is processed successfully.'): void
+    {
+        $this->answerQueryWith(['ResultCode' => (string) $code, 'ResultDesc' => $description]);
     }
 
     /**

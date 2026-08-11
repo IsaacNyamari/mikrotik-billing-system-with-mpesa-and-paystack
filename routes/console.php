@@ -16,6 +16,14 @@ Schedule::command('hotspot:sweep --retry')
     ->withoutOverlapping()
     ->runInBackground();
 
+// For customers who paid and then closed the page: the portal asks the provider on every poll,
+// but nobody is polling once the tab is gone. Their purchase still has to be recorded and their
+// login still has to exist.
+Schedule::command('payments:reconcile')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->runInBackground();
+
 // Keeps the dashboard's view of each device honest, and records outages.
 Schedule::command('router:test')
     ->everyFiveMinutes()

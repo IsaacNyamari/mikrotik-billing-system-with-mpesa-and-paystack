@@ -22,6 +22,16 @@ use Throwable;
  */
 class PaystackGateway implements PaymentGateway
 {
+    /**
+     * Statuses that mean the charge is still with the customer rather than finished with.
+     *
+     * @var array<int, string>
+     */
+    protected const IN_FLIGHT = [
+        'pending', 'ongoing', 'processing', 'queued',
+        'send_otp', 'send_pin', 'send_phone', 'send_birthday', 'send_address', 'open_url', 'pay_offline',
+    ];
+
     public function provider(): PaymentProvider
     {
         return PaymentProvider::Paystack;
@@ -98,24 +108,117 @@ class PaystackGateway implements PaymentGateway
         );
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    public function verify(string $reference): array
+    public function verify(string $reference): VerificationResult
     {
         $configuration = $this->configuration();
 
         if ($configuration === null) {
-            return [];
+            return VerificationResult::unknown();
         }
 
         try {
-            return $this->client($configuration)->get('/transaction/verify/'.urlencode($reference))->json() ?? [];
+            $response = $this->client($configuration)->get('/transaction/verify/'.urlencode($reference));
         } catch (Throwable $e) {
             Log::warning('Paystack verification failed', ['reference' => $reference, 'error' => $e->getMessage()]);
 
-            return [];
+            return VerificationResult::unknown();
         }
+
+        $body = $response->json() ?? [];
+
+        // A reference Paystack has never heard of, or an outage, says nothing about the
+        // customer — it must not be read as a refusal.
+        if (! $response->successful() || ($body['status'] ?? false) !== true || ! is_array($body['data'] ?? null)) {
+            return VerificationResult::unknown(is_array($body) ? $body : []);
+        }
+
+        return $this->interpret($body['data']);
+    }
+
+    /**
+     * Paystack's own answer is complete — it names the transaction and reports the amount — so
+     * there is nothing to wait for a webhook to add.
+     */
+    public function verificationGraceSeconds(): int
+    {
+        return 0;
+    }
+
+    /**
+     * Read a Paystack transaction object, from a webhook or from a verification.
+     *
+     * Both carry the same `data` shape, and both have to agree about what counts as a
+     * cancellation — otherwise whichever arrived first would decide what the customer is told.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function interpret(array $data, ?string $event = null): VerificationResult
+    {
+        $status = is_string($data['status'] ?? null) ? strtolower((string) $data['status']) : null;
+        $response = isset($data['gateway_response']) ? (string) $data['gateway_response'] : null;
+
+        if ($event === 'charge.success' || $status === 'success') {
+            return VerificationResult::paid(
+                receipt: $this->receipt($data),
+                // Reported in the currency's smallest unit, so cents come back to shillings.
+                amount: isset($data['amount']) ? (string) ((int) $data['amount'] / 100) : null,
+                description: $response,
+                raw: $data,
+            );
+        }
+
+        // Still with the customer: mobile money sits here for as long as the prompt is unanswered.
+        if (in_array($status, self::IN_FLIGHT, true)) {
+            return VerificationResult::pending($data);
+        }
+
+        if ($status === null) {
+            return VerificationResult::unknown($data);
+        }
+
+        // "abandoned" is Paystack for a charge the customer walked away from, which to them is
+        // the same event as pressing cancel.
+        return $status === 'abandoned' || $this->readsAsRefusal($response)
+            ? VerificationResult::cancelled($response, $data)
+            : VerificationResult::failed($response, $data);
+    }
+
+    /**
+     * The code the customer logs in with.
+     *
+     * `receipt_number` is where Paystack puts the M-PESA code — the one the customer has in
+     * their confirmation SMS, and so the only one worth naming their login after. Verified
+     * against a real settled charge, which carried "UHB6H1ZT6H" there.
+     *
+     * `authorization.mobile_money_number` is deliberately **not** used as a fallback: it is the
+     * payer's own phone number, so treating it as a receipt hands out a login named after the
+     * customer's number, which is both wrong and theirs to keep private.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    protected function receipt(array $data): ?string
+    {
+        $candidate = $data['receipt_number'] ?? null;
+
+        if (is_string($candidate) && trim($candidate) !== '') {
+            return trim($candidate);
+        }
+
+        // No code from the provider: our own reference at least names the purchase after
+        // something that exists on both sides.
+        return isset($data['reference']) ? (string) $data['reference'] : null;
+    }
+
+    /**
+     * Whether the provider's own words describe the customer saying no.
+     *
+     * Paystack has no distinct status for it — a cancelled mobile-money charge is a failed one
+     * whose gateway_response says so — so the wording is what there is to read.
+     */
+    protected function readsAsRefusal(?string $response): bool
+    {
+        return $response !== null
+            && preg_match('/cancel|declin|reject|refus|abort|denied|not authoriz/i', $response) === 1;
     }
 
     public function isConfigured(): bool

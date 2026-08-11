@@ -121,6 +121,39 @@ class Payment extends Model
     }
 
     /**
+     * What to tell the customer standing at the portal.
+     *
+     * The provider's own wording is repeated only when it describes what happened on the
+     * customer's own phone — "insufficient funds" tells them exactly what to do next. Anything
+     * that went wrong before the prompt was ever sent is not about them: an API fault, an
+     * outage, a half-finished setup. Those read as gibberish to a walk-in, and the setup ones
+     * would tell a stranger about the ISP's own configuration, so they get a plain instruction
+     * instead and the provider's exact words are kept on the record for the ISP.
+     */
+    public function customerMessage(): string
+    {
+        return match ($this->status) {
+            PaymentStatus::Cancelled => __('You cancelled the request on your phone. Nothing was charged.'),
+            PaymentStatus::Abandoned => __('No response came back from your phone. Nothing was charged.'),
+            PaymentStatus::Failed => $this->reachedTheCustomer()
+                ? ($this->result_description ?? __('The payment did not go through.'))
+                : __('We could not start the payment just now. Please try again in a moment.'),
+            default => $this->result_description ?? '',
+        };
+    }
+
+    /**
+     * Whether the provider ever got as far as prompting the phone.
+     *
+     * The handle it gives back is only issued once it has accepted the charge, so its absence
+     * is the plainest evidence that nothing ever reached the customer.
+     */
+    public function reachedTheCustomer(): bool
+    {
+        return $this->checkout_request_id !== null;
+    }
+
+    /**
      * Columns are qualified because reporting joins payments to plans and routers, and both
      * of those carry a "status" of their own.
      *

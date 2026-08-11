@@ -10,10 +10,19 @@ enum PaymentStatus: string
     /** Confirmed by a callback. Money has moved. */
     case Paid = 'paid';
 
-    /** The customer declined, timed out, or had insufficient funds. */
+    /** The prompt failed on its own — insufficient funds, a timeout, a wrong PIN. */
     case Failed = 'failed';
 
-    /** Safaricom never came back and we stopped waiting. */
+    /**
+     * The customer said no.
+     *
+     * Kept apart from a failure because it is the one outcome the customer already knows about:
+     * they pressed cancel a second ago, and the portal saying "cancelled" rather than "failed"
+     * is the difference between a page that agrees with them and one that seems broken.
+     */
+    case Cancelled = 'cancelled';
+
+    /** The provider never came back and we stopped waiting. */
     case Abandoned = 'abandoned';
 
     public function label(): string
@@ -22,6 +31,7 @@ enum PaymentStatus: string
             self::Pending => 'Awaiting payment',
             self::Paid => 'Paid',
             self::Failed => 'Failed',
+            self::Cancelled => 'Cancelled',
             self::Abandoned => 'No response',
         };
     }
@@ -32,6 +42,7 @@ enum PaymentStatus: string
             self::Pending => 'amber',
             self::Paid => 'green',
             self::Failed => 'red',
+            self::Cancelled => 'zinc',
             self::Abandoned => 'zinc',
         };
     }

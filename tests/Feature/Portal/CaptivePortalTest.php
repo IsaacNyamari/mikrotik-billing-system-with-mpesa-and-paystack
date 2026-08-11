@@ -214,9 +214,16 @@ class CaptivePortalTest extends TestCase
             ->set('selectedPlanId', $this->plan->id)
             ->set('phone', '0712345678')
             ->call('pay')
-            ->assertSee('Unable to lock subscriber');
+            // The prompt never reached them, so the provider's own words describe our problem,
+            // not theirs. They get something they can act on instead.
+            ->assertSee('try again in a moment')
+            ->assertDontSee('Unable to lock subscriber');
 
-        $this->assertSame(PaymentStatus::Failed, Payment::query()->sole()->status);
+        $payment = Payment::query()->sole();
+
+        $this->assertSame(PaymentStatus::Failed, $payment->status);
+        // Kept in full for the ISP, who is the one who can do something about it.
+        $this->assertSame('Unable to lock subscriber', $payment->result_description);
     }
 
     #[Test]

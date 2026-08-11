@@ -19,6 +19,9 @@ use Illuminate\Support\Facades\Log;
  */
 class CallbackProcessor
 {
+    /** Safaricom's ResultCode for a prompt the customer dismissed. */
+    protected const CANCELLED_BY_USER = 1032;
+
     public function __construct(
         protected HotspotUserProvisioner $provisioner,
         protected AuditLogger $audit,
@@ -93,6 +96,14 @@ class CallbackProcessor
         ?string $description,
         array $payload,
     ): Payment {
+        // The webhook and the portal's own polling can arrive at the same conclusion at the same
+        // moment. Whoever loses the race must not issue a second login.
+        $payment->refresh();
+
+        if ($payment->status->isSettled()) {
+            return $payment;
+        }
+
         DB::transaction(function () use ($payment, $payload, $receipt, $amount, $phone, $description): void {
             $payment->status = PaymentStatus::Paid;
             $payment->receipt = $receipt;
@@ -130,7 +141,36 @@ class CallbackProcessor
      */
     public function reject(Payment $payment, ?int $code, ?string $description, array $payload): Payment
     {
-        $payment->status = PaymentStatus::Failed;
+        return $this->close($payment, PaymentStatus::Failed, $code, $description, $payload);
+    }
+
+    /**
+     * Record that the customer said no.
+     *
+     * Separate from a rejection because the portal tells them something different: they pressed
+     * cancel and already know it, so calling it a failure reads as the page being broken.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function cancel(Payment $payment, ?int $code, ?string $description, array $payload): Payment
+    {
+        return $this->close($payment, PaymentStatus::Cancelled, $code, $description, $payload);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    protected function close(Payment $payment, PaymentStatus $status, ?int $code, ?string $description, array $payload): Payment
+    {
+        $payment->refresh();
+
+        // A payment settled between deciding to close it and getting here — a callback landing
+        // mid-poll — keeps the outcome it already has.
+        if ($payment->status->isSettled()) {
+            return $payment;
+        }
+
+        $payment->status = $status;
         $payment->result_code = $code;
         $payment->result_description = $description;
         $payment->callback_payload = $payload;
@@ -146,7 +186,7 @@ class CallbackProcessor
      * Provisioning failure does not undo the payment: the money has moved, so the record
      * stands and the sweeper's retry picks the access up.
      */
-    protected function grantAccess(Payment $payment): Payment
+    public function grantAccess(Payment $payment): Payment
     {
         if ($payment->hotspot_user_id !== null || $payment->plan_id === null || $payment->router_id === null) {
             return $payment;
@@ -176,14 +216,15 @@ class CallbackProcessor
      */
     protected function settleFailed(Payment $payment, array $payload, int $resultCode): Payment
     {
-        $payment->status = PaymentStatus::Failed;
-        $payment->result_code = $resultCode;
-        $payment->result_description = $payload['ResultDesc'] ?? null;
-        $payment->callback_payload = $payload;
-        $payment->failed_at = now();
-        $payment->save();
-
-        return $payment;
+        return $this->close(
+            payment: $payment,
+            // 1032 is Safaricom for the customer dismissing the prompt, which the portal says
+            // in their words rather than calling it a failure.
+            status: $resultCode === self::CANCELLED_BY_USER ? PaymentStatus::Cancelled : PaymentStatus::Failed,
+            code: $resultCode,
+            description: isset($payload['ResultDesc']) ? (string) $payload['ResultDesc'] : null,
+            payload: $payload,
+        );
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Models\PaystackConfiguration;
 use App\Models\Tenant;
@@ -74,30 +75,38 @@ class PaystackWebhookController extends Controller
                     return;
                 }
 
-                $event = $payload['event'] ?? null;
-                $data = $payload['data'] ?? [];
+                $event = is_string($payload['event'] ?? null) ? (string) $payload['event'] : null;
+                $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
 
-                if ($event !== 'charge.success' || ($data['status'] ?? null) !== 'success') {
-                    $processor->reject(
-                        $payment,
-                        null,
-                        (string) ($data['gateway_response'] ?? $event ?? 'Payment was not completed'),
-                        $payload,
-                    );
-
+                // Paystack sends more than charge results down the same hook — disputes,
+                // refunds, transfers. Only a charge decides whether this customer gets online.
+                if ($event !== null && ! str_starts_with($event, 'charge.')) {
                     return;
                 }
 
-                $processor->settle(
-                    payment: $payment,
-                    // Paystack's own receipt, which becomes the customer's login.
-                    receipt: $this->receipt($data, $reference = (string) $data['reference']),
-                    // Reported in the currency's smallest unit, so cents come back to shillings.
-                    amount: isset($data['amount']) ? (string) ((int) $data['amount'] / 100) : null,
-                    phone: null,
-                    description: isset($data['gateway_response']) ? (string) $data['gateway_response'] : null,
-                    payload: $payload,
-                );
+                // Read by the gateway, so a webhook and a poll cannot disagree about what
+                // "cancelled" means.
+                $result = $gateway->interpret($data, $event);
+
+                match ($result->status) {
+                    PaymentStatus::Paid => $processor->settle(
+                        payment: $payment,
+                        receipt: $result->receipt,
+                        amount: $result->amount,
+                        phone: null,
+                        description: $result->description,
+                        payload: $payload,
+                    ),
+                    PaymentStatus::Cancelled => $processor->cancel($payment, null, $result->description, $payload),
+                    PaymentStatus::Failed => $processor->reject(
+                        $payment,
+                        null,
+                        $result->description ?? 'Payment was not completed',
+                        $payload,
+                    ),
+                    // Paystack reporting a charge still in flight is not an outcome to record.
+                    default => null,
+                };
             });
         } catch (Throwable $e) {
             // The money has already moved by the time this arrives. Recording the fault beats
@@ -106,27 +115,6 @@ class PaystackWebhookController extends Controller
         }
 
         return $this->acknowledge();
-    }
-
-    /**
-     * The code the customer logs in with.
-     *
-     * Paystack's M-PESA receipt is the one a customer would recognise from their SMS, so it is
-     * preferred over Paystack's own transaction reference.
-     *
-     * @param  array<string, mixed>  $data
-     */
-    protected function receipt(array $data, string $fallback): string
-    {
-        $mpesaReceipt = $data['authorization']['receiver_bank_account_number']
-            ?? $data['authorization']['mobile_money_number']
-            ?? null;
-
-        // Paystack exposes the mobile-money confirmation under different keys depending on the
-        // channel, so anything that is not clearly a receipt falls back to our own reference.
-        return is_string($mpesaReceipt) && $mpesaReceipt !== '' && ! str_starts_with($mpesaReceipt, '+')
-            ? $mpesaReceipt
-            : $fallback;
     }
 
     protected function acknowledge(): JsonResponse

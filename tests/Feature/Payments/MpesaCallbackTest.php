@@ -105,7 +105,9 @@ class MpesaCallbackTest extends TestCase
 
         $payment->refresh();
 
-        $this->assertSame(PaymentStatus::Failed, $payment->status);
+        // Recorded as a cancellation rather than a failure: the customer pressed cancel and
+        // knows it, so this is what the portal has to be able to tell them.
+        $this->assertSame(PaymentStatus::Cancelled, $payment->status);
         $this->assertSame(1032, $payment->result_code);
         $this->assertNull($payment->hotspot_user_id);
         $this->assertSame(0, HotspotUser::query()->count());
