@@ -1,0 +1,21 @@
+[Unit]
+# Expiry, payment reconciliation and router health all hang off the scheduler. A customer
+# whose hour is up should lose access within the minute, and a customer who paid and closed
+# the tab still has a purchase to record — neither happens if this is not running.
+Description=ISP platform scheduler
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/isp
+ExecStart=/usr/bin/php /var/www/isp/artisan schedule:work
+Restart=always
+RestartSec=10
+
+# The scheduler is the one process that must survive a bad minute rather than give up.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

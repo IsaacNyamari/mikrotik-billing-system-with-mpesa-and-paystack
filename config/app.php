@@ -65,7 +65,10 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    // Set per installation. A Kenyan ISP reads its earnings report in EAT, and a payment
+    // stamped three hours off is one an operator cannot reconcile against an M-PESA statement.
+    // Left at UTC locally and in tests, so neither depends on where the developer is sitting.
+    'timezone' => env('APP_TIMEZONE', 'UTC'),
 
     /*
     |--------------------------------------------------------------------------

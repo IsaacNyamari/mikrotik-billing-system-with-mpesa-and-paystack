@@ -1,0 +1,20 @@
+[Unit]
+# Router provisioning, notifications and integrations are queued so a slow device never
+# holds a customer's page open.
+Description=ISP platform queue worker
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/isp
+# --max-time recycles the worker hourly so a leaked connection or a stale config cannot
+# accumulate. RouterOS timeouts are short by design, so a job that hangs is a job to kill.
+ExecStart=/usr/bin/php /var/www/isp/artisan queue:work --sleep=3 --tries=3 --timeout=90 --max-time=3600
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

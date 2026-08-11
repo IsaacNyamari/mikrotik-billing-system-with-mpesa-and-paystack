@@ -355,6 +355,27 @@ ISP — a HotSpot's front page is the whole of what most customers ever see of t
 
 The scheduler must actually be running: `php artisan schedule:work`.
 
+### Production (`isp.solforbs.com`)
+
+Ubuntu 24.04 at `178.162.241.172`, **shared** with `sms`, `panel`, `mail` and the apex site.
+Nothing in a deploy may disturb those: the app gets its own nginx server block, its own MySQL
+database and user, and its own Redis prefix and database numbers, and it changes nothing else.
+
+- `/var/www/isp`, served by nginx over the shared `php8.3-fpm.sock` pool. Code is `root:www-data`
+  and read-only to the web user; only `storage` and `bootstrap/cache` are writable by it, and
+  `.env` is `640 root:www-data`.
+- `deploy/push.sh` sends the working tree from the development machine and runs
+  `deploy/release.sh` on the server. There is no git remote, so what is on that machine is what
+  runs. `.env` is never transferred.
+- `isp-scheduler.service` and `isp-queue.service` are systemd units, both `Restart=always`. The
+  scheduler is not optional: expiry, `payments:reconcile` and router health all ride on it.
+- **`APP_TIMEZONE=Africa/Nairobi`** in production, UTC locally and in tests. A payment stamped
+  three hours off is one an operator cannot reconcile against an M-PESA statement.
+- `php artisan platform:admin` creates the super admin, interactively. The platform deliberately
+  seeds no account: a seeded admin is one with a password somebody wrote down.
+- Certificates come from certbot `certonly --webroot` against `/var/www/html`, so renewal never
+  rewrites the server block.
+
 ### The live test device
 
 An RB951Ui-2HnD on RouterOS 7.23.2, reachable on the LAN. Its HotSpot is already configured —
@@ -384,7 +405,7 @@ plans and billing, because the MikroTik integration is what the rest hangs off.
 | 13 | Reports and earnings analytics | done |
 | 14 | WireGuard management network | |
 | 15 | Security review and audit | |
-| 16 | Production deployment | |
+| 16 | Production deployment | done |
 
 FreeRADIUS is no longer a phase of its own; it becomes an alternative provisioning backend if and
 when scale calls for it.
