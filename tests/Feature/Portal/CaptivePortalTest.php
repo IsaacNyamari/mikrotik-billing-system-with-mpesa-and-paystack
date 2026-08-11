@@ -11,6 +11,7 @@ use App\Models\Plan;
 use App\Models\Router;
 use App\Models\Tenant;
 use App\Services\Mpesa\Contracts\MpesaGateway;
+use App\Services\Mpesa\StkPushResult;
 use App\Services\Mpesa\Testing\FakeMpesaGateway;
 use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -157,6 +158,51 @@ class CaptivePortalTest extends TestCase
             ->set('phone', '0712345678')
             ->call('pay')
             ->assertHasErrors(['selectedPlanId']);
+    }
+
+    #[Test]
+    public function an_isp_that_has_not_set_up_mpesa_says_so_rather_than_erroring(): void
+    {
+        $this->configuration->delete();
+
+        $this->get($this->router->portalUrl())
+            ->assertOk()
+            ->assertSee('Payments are not set up yet')
+            // Offering a button that cannot work would only waste the customer's time.
+            ->assertDontSee('Pay with M-PESA');
+    }
+
+    #[Test]
+    public function a_customer_never_sees_a_stack_trace_when_the_gateway_breaks(): void
+    {
+        // Whatever goes wrong behind the scenes, a person standing in a shop gets something
+        // they can act on.
+        $this->app->bind(MpesaGateway::class, fn () => new class implements MpesaGateway
+        {
+            public function stkPush(
+                MpesaConfiguration $configuration,
+                string $phone,
+                int $amount,
+                string $accountReference,
+                string $description,
+                string $callbackUrl,
+            ): StkPushResult {
+                throw new \RuntimeException('Daraja is on fire');
+            }
+
+            public function query(MpesaConfiguration $configuration, string $checkoutRequestId): array
+            {
+                return [];
+            }
+        });
+
+        Livewire::test('pages::portal.index', ['portalKey' => $this->router->portal_key])
+            ->set('selectedPlanId', $this->plan->id)
+            ->set('phone', '0712345678')
+            ->call('pay')
+            ->assertHasErrors('payment')
+            ->assertDontSee('Daraja is on fire')
+            ->assertSee('ask at the counter');
     }
 
     #[Test]

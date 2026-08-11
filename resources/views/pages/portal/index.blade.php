@@ -1,12 +1,14 @@
 <?php
 
 use App\Enums\PaymentStatus;
+use App\Models\MpesaConfiguration;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Router;
 use App\Services\Mpesa\PaymentCollector;
 use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -118,6 +120,18 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             : Payment::query()->with('hotspotUser')->find($this->paymentId);
     }
 
+    /**
+     * Whether this ISP can take money right now.
+     *
+     * An ISP that has not finished setting up M-PESA is an ordinary state, not an error, so
+     * the portal says so plainly rather than offering a button that cannot work.
+     */
+    #[Computed]
+    public function canTakePayment(): bool
+    {
+        return MpesaConfiguration::query()->where('is_active', true)->exists();
+    }
+
     public function pay(PaymentCollector $collector): void
     {
         $validated = $this->validate([
@@ -131,10 +145,24 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
 
         $plan = Plan::query()->findOrFail($validated['selectedPlanId']);
 
-        $payment = $collector->collect($plan, $this->router, $validated['phone'], [
-            'client_mac' => $this->clientMac !== '' ? $this->clientMac : null,
-            'client_ip' => $this->clientIp !== '' ? $this->clientIp : null,
-        ]);
+        try {
+            $payment = $collector->collect($plan, $this->router, $validated['phone'], [
+                'client_mac' => $this->clientMac !== '' ? $this->clientMac : null,
+                'client_ip' => $this->clientIp !== '' ? $this->clientIp : null,
+            ]);
+        } catch (\Throwable $e) {
+            // A customer standing in a shop should never be shown a stack trace. The detail
+            // goes to the log for the ISP; they get something they can act on.
+            Log::error('Portal payment could not be started', [
+                'tenant_id' => Tenancy::id(),
+                'plan_id' => $plan->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            $this->addError('payment', __('Payments are not available right now. Please ask at the counter.'));
+
+            return;
+        }
 
         $this->paymentId = $payment->id;
     }
@@ -251,54 +279,106 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             <flux:button class="mt-4 w-full" wire:click="startOver">{{ __('Try again') }}</flux:button>
         </div>
     @else
-        <form wire:submit="pay" class="flex flex-col gap-4">
+        @unless ($this->canTakePayment)
+            <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center dark:border-amber-900 dark:bg-amber-950">
+                <p class="font-medium text-amber-900 dark:text-amber-100">{{ __('Payments are not set up yet') }}</p>
+                <p class="mt-1 text-sm text-amber-800 dark:text-amber-200">
+                    {{ __('Please ask at the counter for access.') }}
+                </p>
+            </div>
+        @endunless
+
+        <form wire:submit="pay" class="flex flex-col gap-3">
             @forelse ($this->plans as $plan)
+                @php($selected = $selectedPlanId === $plan->id)
+
                 <label
-                    class="flex cursor-pointer items-center justify-between rounded-xl border-2 bg-white p-4 transition dark:bg-zinc-900 {{ $selectedPlanId === $plan->id ? 'border-blue-500' : 'border-zinc-200 dark:border-zinc-700' }}"
                     wire:key="plan-{{ $plan->id }}"
+                    @class([
+                        'relative flex cursor-pointer items-center gap-4 rounded-xl border bg-white p-4 shadow-sm transition dark:bg-zinc-900',
+                        'border-blue-600 ring-2 ring-blue-600/20 dark:border-blue-400' => $selected,
+                        'border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600' => ! $selected,
+                    ])
                 >
-                    <div>
+                    <input
+                        type="radio"
+                        wire:model.live="selectedPlanId"
+                        value="{{ $plan->id }}"
+                        class="size-5 shrink-0 border-zinc-300 text-blue-600 focus:ring-blue-600 dark:border-zinc-600"
+                    >
+
+                    <div class="min-w-0 flex-1">
                         <p class="font-semibold text-zinc-900 dark:text-white">{{ $plan->name }}</p>
-                        <p class="text-sm text-zinc-500 dark:text-zinc-400">
+                        <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
                             {{ $plan->validityForHumans() }} &middot; {{ $plan->speedForHumans() }}
-                            @if ($plan->data_cap_mb)
-                                &middot; {{ number_format($plan->data_cap_mb) }} MB
-                            @endif
                         </p>
+                        @if ($plan->data_cap_mb)
+                            <p class="text-sm text-zinc-500 dark:text-zinc-400">
+                                {{ number_format($plan->data_cap_mb) }} MB {{ __('included') }}
+                            </p>
+                        @endif
                     </div>
-                    <div class="flex items-center gap-3">
-                        <span class="text-lg font-bold text-zinc-900 dark:text-white">
+
+                    <div class="shrink-0 text-right">
+                        <span class="text-xl font-bold tabular-nums text-zinc-900 dark:text-white">
                             {{ number_format((float) $plan->price, 0) }}
                         </span>
-                        <input type="radio" wire:model.live="selectedPlanId" value="{{ $plan->id }}" class="size-5">
+                        <span class="block text-xs text-zinc-400">{{ $this->tenant->currency }}</span>
                     </div>
                 </label>
             @empty
-                <div class="rounded-xl border border-zinc-200 p-6 text-center dark:border-zinc-700">
+                <div class="rounded-xl border border-zinc-200 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
                     <p class="text-zinc-600 dark:text-zinc-400">{{ __('No packages are on sale right now.') }}</p>
                 </div>
             @endforelse
 
             @error('selectedPlanId')
-                <p class="text-sm text-red-600">{{ $message }}</p>
+                <p class="text-sm font-medium text-red-600 dark:text-red-400">{{ $message }}</p>
             @enderror
 
-            @if ($this->plans->isNotEmpty())
-                <div>
-                    <flux:input
+            @if ($this->plans->isNotEmpty() && $this->canTakePayment)
+                <div class="mt-2">
+                    <label for="portal-phone" class="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                        {{ __('M-PESA number') }}
+                    </label>
+                    <input
+                        id="portal-phone"
                         wire:model="phone"
                         type="tel"
                         inputmode="numeric"
-                        :label="__('M-PESA number')"
+                        autocomplete="tel"
                         placeholder="07XX XXX XXX"
                         required
-                    />
+                        @class([
+                            'block w-full rounded-lg border bg-white px-3 py-2.5 text-base text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 focus:ring-2 dark:bg-zinc-900 dark:text-white',
+                            'border-red-500 focus:border-red-500 focus:ring-red-500/20' => $errors->has('phone'),
+                            'border-zinc-300 focus:border-blue-600 focus:ring-blue-600/20 dark:border-zinc-600' => ! $errors->has('phone'),
+                        ])
+                    >
+                    @error('phone')
+                        <p class="mt-1.5 text-sm font-medium text-red-600 dark:text-red-400">{{ $message }}</p>
+                    @enderror
                 </div>
 
-                <flux:button variant="primary" type="submit" class="w-full">
+                @error('payment')
+                    <div class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950">
+                        <p class="text-sm font-medium text-red-800 dark:text-red-200">{{ $message }}</p>
+                    </div>
+                @enderror
+
+                <button
+                    type="submit"
+                    wire:loading.attr="disabled"
+                    wire:target="pay"
+                    class="mt-1 flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600/40 disabled:opacity-60"
+                >
+                    <svg wire:loading wire:target="pay" class="size-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                    </svg>
                     <span wire:loading.remove wire:target="pay">{{ __('Pay with M-PESA') }}</span>
                     <span wire:loading wire:target="pay">{{ __('Sending request…') }}</span>
-                </flux:button>
+                </button>
             @endif
         </form>
     @endif
