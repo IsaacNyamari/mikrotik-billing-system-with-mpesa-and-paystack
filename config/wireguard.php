@@ -80,6 +80,23 @@ return [
         // script wipes the device: a reset leaves no DHCP client behind, and a
         // router with no way out never reaches us again.
         'wan_interface' => 'ether1',
+
+        // The wifi customers actually see. A reset leaves the radio switched
+        // off and nameless, so a HotSpot built without this is one nobody can
+        // find: there is nothing to connect to.
+        //
+        // The network is deliberately open. The HotSpot is what authenticates
+        // people, and a wifi password would mean turning somebody away before
+        // they have had the chance to buy anything.
+        'wireless_interface' => 'wlan1',
+        'ssid' => null,
+
+        // PPPoE. Its own interface by default, because a HotSpot and a PPPoE
+        // server on the same segment both try to answer the same client.
+        'pppoe_interface' => 'ether4',
+        'pppoe_network' => '10.20.0.0/24',
+        'pppoe_gateway' => '10.20.0.1',
+        'pppoe_service_name' => 'isp',
     ],
 
     /*

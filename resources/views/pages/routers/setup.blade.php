@@ -31,6 +31,20 @@ new #[Title('Router setup')] class extends Component {
 
     public bool $withHotspot = true;
 
+    /** The wifi customers look for on their phone. */
+    public bool $withWireless = true;
+
+    public string $wirelessInterface = '';
+
+    public string $ssid = '';
+
+    /** A PPPoE server, so the secrets the platform writes can authenticate somebody. */
+    public bool $withPppoe = false;
+
+    public string $pppoeInterface = '';
+
+    public string $pppoeService = '';
+
     /** Whether the script erases the router first. Never the default. */
     public bool $wipe = false;
 
@@ -48,6 +62,16 @@ new #[Title('Router setup')] class extends Component {
         $this->wanInterface = (string) ($options['wan_interface'] ?? 'ether1');
         $this->withHotspot = (bool) ($options['with_hotspot'] ?? true);
         $this->wipe = (bool) ($options['wipe'] ?? false);
+
+        $this->withWireless = (bool) ($options['with_wireless'] ?? true);
+        $this->wirelessInterface = (string) ($options['wireless_interface'] ?? 'wlan1');
+        // Blank means "use what the ISP calls itself", which is what a customer scanning a
+        // list of wifi names is looking for.
+        $this->ssid = (string) ($options['ssid'] ?? '');
+
+        $this->withPppoe = (bool) ($options['with_pppoe'] ?? false);
+        $this->pppoeInterface = (string) ($options['pppoe_interface'] ?? 'ether4');
+        $this->pppoeService = (string) ($options['pppoe_service_name'] ?? 'isp');
     }
 
     #[Computed]
@@ -70,10 +94,25 @@ new #[Title('Router setup')] class extends Component {
             'wan_interface' => $this->wanInterface,
             'with_hotspot' => $this->withHotspot,
             'wipe' => $this->wipe,
+            'with_wireless' => $this->withWireless,
+            'wireless_interface' => $this->wirelessInterface,
+            'ssid' => $this->ssid,
+            'with_pppoe' => $this->withPppoe,
+            'pppoe_interface' => $this->pppoeInterface,
+            'pppoe_service_name' => $this->pppoeService,
             // The password already on the router stays valid until the operator deliberately
             // rotates it, so opening this page does not silently lock out a working device.
             'api_password' => $this->router->api_password,
         ]);
+    }
+
+    /**
+     * What the wifi is called when the ISP has not said otherwise.
+     */
+    #[Computed]
+    public function defaultSsid(): string
+    {
+        return \App\Models\PortalSetting::current()->displayName($this->router->tenant);
     }
 
     #[Computed]
@@ -317,6 +356,90 @@ new #[Title('Router setup')] class extends Component {
                     :label="__('Set up the HotSpot too')"
                     :description="__('Turn off if you would rather build the customer network yourself afterwards.')"
                 />
+            @endif
+        </flux:card>
+
+        {{-- The wifi ---------------------------------------------------------- --}}
+        @if ($withHotspot)
+            <flux:card class="flex flex-col gap-5">
+                <div>
+                    <flux:heading size="lg">{{ __('The wifi customers connect to') }}</flux:heading>
+                    <flux:subheading>
+                        {{ __('A HotSpot with no wireless network is one nobody can find — there is nothing on their phone to tap.') }}
+                    </flux:subheading>
+                </div>
+
+                <flux:switch
+                    wire:model.live="withWireless"
+                    :label="__('Create the wifi network')"
+                    :description="__('Turn off for a router whose wireless is handled by separate access points.')"
+                />
+
+                @if ($withWireless)
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <flux:input
+                            wire:model.live.debounce.500ms="ssid"
+                            :label="__('Network name (SSID)')"
+                            :placeholder="$this->defaultSsid"
+                            :description="__('What appears in the wifi list. Leave blank to use your own name.')"
+                        />
+
+                        <flux:input
+                            wire:model.live.debounce.500ms="wirelessInterface"
+                            :label="__('Wireless interface')"
+                            placeholder="wlan1"
+                            :description="__('On boards with the newer wifi package this is detected automatically.')"
+                        />
+                    </div>
+
+                    <flux:callout icon="information-circle">
+                        <flux:callout.text>
+                            {{ __('The network is created open, with no wifi password. The HotSpot is what checks who someone is — a password would turn a customer away before they could buy anything.') }}
+                        </flux:callout.text>
+                    </flux:callout>
+                @endif
+            </flux:card>
+        @endif
+
+        {{-- PPPoE ------------------------------------------------------------- --}}
+        <flux:card class="flex flex-col gap-5">
+            <div>
+                <flux:heading size="lg">{{ __('PPPoE for fixed lines') }}</flux:heading>
+                <flux:subheading>
+                    {{ __('Without a server here, the credentials this platform writes are a list nothing ever asks for.') }}
+                </flux:subheading>
+            </div>
+
+            <flux:switch
+                wire:model.live="withPppoe"
+                :label="__('Create a PPPoE server')"
+                :description="__('For subscribers on a cable rather than the wifi.')"
+            />
+
+            @if ($withPppoe)
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <flux:input
+                        wire:model.live.debounce.500ms="pppoeInterface"
+                        :label="__('Interface for subscriber lines')"
+                        placeholder="ether4"
+                        :description="__('Its own port. A HotSpot and a PPPoE server on one segment both answer the same customer.')"
+                    />
+
+                    <flux:input
+                        wire:model.live.debounce.500ms="pppoeService"
+                        :label="__('Service name')"
+                        placeholder="isp"
+                        :description="__('What subscriber routers look for. Most accept anything.')"
+                    />
+                </div>
+
+                @if ($withPppoe && $withHotspot && $pppoeInterface === $lanInterface)
+                    <flux:callout variant="warning" icon="exclamation-triangle">
+                        <flux:callout.text>
+                            {{ __('That is the same port the HotSpot uses. Both will try to answer the same customer, and a subscriber on a fixed line will find themselves at a captive portal.') }}
+                        </flux:callout.text>
+                    </flux:callout>
+                @endif
             @endif
         </flux:card>
 

@@ -3,6 +3,7 @@
 namespace App\Services\Provisioning;
 
 use App\Http\Controllers\HotspotPageController;
+use App\Models\PortalSetting;
 use App\Models\Router;
 use App\Support\PublicUrl;
 use Illuminate\Support\Str;
@@ -53,6 +54,16 @@ class RouterSetupScript
         // ISP's own configuration.
         $wipe = ($options['wipe'] ?? $defaults['wipe'] ?? false) === true;
 
+        $wireless = $this->name($options['wireless_interface'] ?? $defaults['wireless_interface'] ?? 'wlan1');
+        $ssid = $this->ssid($options['ssid'] ?? $defaults['ssid'] ?? null, $router);
+        $withWireless = ($options['with_wireless'] ?? $defaults['with_wireless'] ?? true) === true;
+
+        $withPppoe = ($options['with_pppoe'] ?? $defaults['with_pppoe'] ?? false) === true;
+        $pppoeInterface = $this->name($options['pppoe_interface'] ?? $defaults['pppoe_interface'] ?? 'ether4');
+        $pppoeService = $this->name($options['pppoe_service_name'] ?? $defaults['pppoe_service_name'] ?? 'isp');
+        $pppoeNetwork = (string) ($options['pppoe_network'] ?? $defaults['pppoe_network'] ?? '10.20.0.0/24');
+        $pppoeGateway = (string) ($options['pppoe_gateway'] ?? $defaults['pppoe_gateway'] ?? '10.20.0.1');
+
         $network = (string) ($options['hotspot_network'] ?? $defaults['hotspot_network']);
         $gateway = (string) ($options['hotspot_gateway'] ?? $defaults['hotspot_gateway']);
         [$poolStart, $poolEnd] = $this->poolRange($network, $gateway);
@@ -81,6 +92,14 @@ class RouterSetupScript
             'hotspot_gateway' => $gateway,
             'api_username' => $apiUser,
             'api_group' => $apiGroup,
+            'wireless_interface' => $wireless,
+            'ssid' => $ssid,
+            'with_wireless' => $withWireless,
+            'with_pppoe' => $withPppoe,
+            'pppoe_interface' => $pppoeInterface,
+            'pppoe_service_name' => $pppoeService,
+            'pppoe_network' => $pppoeNetwork,
+            'pppoe_gateway' => $pppoeGateway,
         ];
 
         $router->api_username = $apiUser;
@@ -108,6 +127,15 @@ class RouterSetupScript
 
         if ($withHotspot) {
             $lines[] = $this->hotspotSection($router, $bridge, $lan, $pool, $hotspot, $network, $gateway, $poolStart, $poolEnd, $portalHost);
+
+            // After the bridge exists, or there is nothing to put the radio into.
+            if ($withWireless) {
+                $lines[] = $this->wirelessSection($wireless, $ssid, $bridge);
+            }
+        }
+
+        if ($withPppoe) {
+            $lines[] = $this->pppoeSection($pppoeInterface, $pppoeService, $pppoeNetwork, $pppoeGateway, $hotspot.'-pppoe-pool');
         }
 
         $lines[] = $this->closingSection($router);
@@ -153,6 +181,24 @@ class RouterSetupScript
 
         if ($withHotspot) {
             $lines[] = $this->hotspotSection($router, $bridge, $lan, $pool, $hotspot, $network, $gateway, $poolStart, $poolEnd, $portalHost);
+
+            if (($options['with_wireless'] ?? true) === true) {
+                $lines[] = $this->wirelessSection(
+                    $this->name($options['wireless_interface'] ?? 'wlan1'),
+                    $this->ssid($options['ssid'] ?? null, $router),
+                    $bridge,
+                );
+            }
+        }
+
+        if (($options['with_pppoe'] ?? false) === true) {
+            $lines[] = $this->pppoeSection(
+                $this->name($options['pppoe_interface'] ?? 'ether4'),
+                $this->name($options['pppoe_service_name'] ?? 'isp'),
+                (string) ($options['pppoe_network'] ?? '10.20.0.0/24'),
+                (string) ($options['pppoe_gateway'] ?? '10.20.0.1'),
+                $hotspot.'-pppoe-pool',
+            );
         }
 
         $lines[] = $this->closingSection($router);
@@ -312,6 +358,132 @@ class RouterSetupScript
         $router->save();
 
         return $token;
+    }
+
+    /**
+     * The wifi customers connect to.
+     *
+     * Without this a wiped router has a radio that is switched off and nameless, and a HotSpot
+     * nobody can find — there is simply nothing on the phone's list to tap.
+     *
+     * The network is left **open** on purpose. The HotSpot is what authenticates people, and a
+     * wifi password would turn a customer away before they had the chance to buy anything.
+     *
+     * Two radio stacks exist and the commands are not interchangeable: older boards use
+     * /interface/wireless, newer ones the wifi package. The script asks the device which it has
+     * rather than the platform guessing from a model name it may never have seen.
+     */
+    protected function wirelessSection(string $wireless, string $ssid, string $bridge): string
+    {
+        return <<<SCRIPT
+
+        # ---------------------------------------------------------------------
+        # 3c. The wifi itself
+        #
+        # Open by design: the HotSpot is the thing that checks who someone is,
+        # and a wifi password would stop a customer before they could pay.
+        # ---------------------------------------------------------------------
+
+        :put "Bringing up the wifi…";
+
+        :if ([:len [/interface/wireless find]] > 0) do={
+            /interface/wireless/security-profiles
+            :if ([:len [find name="platform-open"]] = 0) do={
+                add name="platform-open" mode=none
+            }
+
+            /interface/wireless
+            set [find default-name="{$wireless}"] \\
+                ssid="{$ssid}" \\
+                mode=ap-bridge \\
+                band=2ghz-b/g/n \\
+                channel-width=20/40mhz-XX \\
+                frequency=auto \\
+                security-profile="platform-open" \\
+                disabled=no
+        } else={
+            :if ([:len [/interface/wifi find]] > 0) do={
+                /interface/wifi
+                set [find] \\
+                    configuration.ssid="{$ssid}" \\
+                    configuration.mode=ap \\
+                    security.authentication-types="" \\
+                    disabled=no
+            } else={
+                :put "No wireless interface on this board — customers will need a cable.";
+            }
+        }
+
+        :delay 3s;
+
+        # The radio has to be in the same bridge as the HotSpot, or the SSID
+        # appears and hands out nothing.
+        :if ([:len [/interface/wireless find]] > 0) do={
+            /interface/bridge/port
+            remove [find interface="{$wireless}"]
+            add bridge="{$bridge}" interface="{$wireless}"
+        } else={
+            :foreach w in=[/interface/wifi find] do={
+                :local n [/interface/wifi get \$w name];
+                /interface/bridge/port remove [find interface=\$n]
+                /interface/bridge/port add bridge="{$bridge}" interface=\$n
+            }
+        }
+        SCRIPT;
+    }
+
+    /**
+     * A PPPoE server, so the secrets this platform writes can authenticate somebody.
+     *
+     * Without one, `/ppp/secret` is a list of credentials no device will ever be asked for.
+     *
+     * Its own interface by default rather than the HotSpot bridge: both would answer the same
+     * client, and a subscriber on a fixed line would find themselves at a captive portal.
+     */
+    protected function pppoeSection(string $interface, string $service, string $network, string $gateway, string $pool): string
+    {
+        $prefix = implode('.', array_slice(explode('.', explode('/', $network)[0]), 0, 3));
+
+        return <<<SCRIPT
+
+        # ---------------------------------------------------------------------
+        # 3d. PPPoE
+        #
+        # For subscribers on a fixed line. The platform writes their credentials
+        # to /ppp/secret; this is the thing that asks for them.
+        # ---------------------------------------------------------------------
+
+        :put "Setting up PPPoE…";
+
+        /interface/pppoe-server/server remove [find service-name="{$service}"]
+        /ppp/profile remove [find name="platform-pppoe"]
+        /ip/pool remove [find name="{$pool}"]
+
+        /ip/pool
+        add name="{$pool}" ranges={$prefix}.10-{$prefix}.254
+
+        /ppp/profile
+        add name="platform-pppoe" \\
+            local-address={$gateway} \\
+            remote-address="{$pool}" \\
+            dns-server=1.1.1.1,8.8.8.8 \\
+            only-one=yes \\
+            change-tcp-mss=yes
+
+        /interface/pppoe-server/server
+        add service-name="{$service}" \\
+            interface="{$interface}" \\
+            default-profile="platform-pppoe" \\
+            authentication=pap,chap,mschap1,mschap2 \\
+            one-session-per-host=yes \\
+            disabled=no
+
+        # PPPoE clients are routed rather than bridged, so their subnet needs a
+        # way out of its own.
+        /ip/firewall/nat
+        remove [find comment="platform-pppoe"]
+        add chain=srcnat src-address={$network} action=masquerade comment="platform-pppoe"
+        SCRIPT;
     }
 
     protected function banner(Router $router, string $portalHost): string
@@ -668,6 +840,27 @@ class RouterSetupScript
         // The first line lands where the heredoc already put it, so only the rest are
         // indented — a heredoc cannot start an interpolated block at column zero.
         return implode("\n".$indent, $lines);
+    }
+
+    /**
+     * The name customers will look for on their phone.
+     *
+     * Defaults to what the ISP calls itself, because a wifi list is not the place to meet
+     * "MikroTik". Spaces are fine — this is read by people, not by RouterOS — but quotes and
+     * backslashes would close the string it sits inside.
+     */
+    protected function ssid(?string $value, Router $router): string
+    {
+        $ssid = trim((string) ($value ?: PortalSetting::current()->displayName($router->tenant)));
+
+        // Held to what a wifi name is actually made of. Stripping only quotes would be enough
+        // to keep the script safe — the value sits inside them — but it would still let an
+        // SSID carry something that reads like a command, and a script nobody can skim is a
+        // script nobody can check.
+        $ssid = trim((string) preg_replace("/[^A-Za-z0-9 _\-.'&+()]/", '', $ssid));
+
+        // 32 bytes is the limit the standard sets, and RouterOS refuses anything longer.
+        return mb_strimwidth($ssid, 0, 32) ?: 'Wifi';
     }
 
     /**
