@@ -10,6 +10,25 @@
                 <flux:sidebar.collapse class="lg:hidden" />
             </flux:sidebar.header>
 
+            @if (auth()->user()->isSuperAdmin())
+                {{-- A platform admin can be looking at any ISP, so which one has to be on
+                     screen at all times — otherwise it is far too easy to change the wrong
+                     ISP's settings. --}}
+                <div class="px-2 pb-2">
+                    <flux:button
+                        size="sm"
+                        variant="ghost"
+                        icon="building-office-2"
+                        icon-trailing="chevrons-up-down"
+                        :href="route('tenants.select')"
+                        wire:navigate
+                        class="w-full justify-start"
+                    >
+                        {{ App\Support\Tenancy\Facades\Tenancy::tenant()?->name ?? __('All ISPs') }}
+                    </flux:button>
+                </div>
+            @endif
+
             <flux:sidebar.nav>
                 <flux:sidebar.group :heading="__('Platform')" class="grid">
                     <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>

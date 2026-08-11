@@ -31,6 +31,13 @@ class ResolveTenant
             : $user->tenant;
 
         if ($tenant === null) {
+            // A super admin belongs to no ISP, so every tenant-scoped screen would throw for
+            // them. Sending them to pick one here is far better than letting the query fail
+            // deep inside a view, where it is too late to do anything graceful.
+            if ($user->isSuperAdmin() && $this->shouldChooseTenant($request)) {
+                return redirect()->route('tenants.select');
+            }
+
             return $next($request);
         }
 
@@ -41,6 +48,27 @@ class ResolveTenant
         Tenancy::set($tenant);
 
         return $next($request);
+    }
+
+    /**
+     * Whether this request should be diverted to the ISP picker.
+     *
+     * Only ordinary page loads are diverted: redirecting a Livewire update or a background
+     * request would replace part of a page with a redirect the browser cannot act on. The
+     * account screens stay reachable so an admin is never locked out of their own settings.
+     */
+    protected function shouldChooseTenant(Request $request): bool
+    {
+        if (! $request->isMethod('GET') || $request->ajax() || $request->wantsJson()) {
+            return false;
+        }
+
+        if ($request->routeIs('tenants.select', 'logout', 'profile.edit', 'appearance.edit', 'security.edit')) {
+            return false;
+        }
+
+        // Nothing to choose from on a fresh install.
+        return Tenant::query()->exists();
     }
 
     protected function impersonatedTenant(Request $request): ?Tenant

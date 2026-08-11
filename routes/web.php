@@ -38,6 +38,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('plans/create', 'pages::plans.form')->name('plans.create');
     Route::livewire('plans/{plan}/edit', 'pages::plans.form')->name('plans.edit');
 
+    // Platform super admins belong to no ISP, so they pick one here before any tenant-scoped
+    // screen has anything to show.
+    Route::livewire('select-isp', 'pages::tenants.select')->name('tenants.select');
+
     Route::livewire('reports/earnings', 'pages::reports.earnings')->name('reports.earnings');
     Route::livewire('settings/mpesa', 'pages::settings.mpesa')->name('settings.mpesa');
 });
