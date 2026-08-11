@@ -101,7 +101,9 @@ class PaystackTest extends TestCase
             // A hosted checkout would need a walled-garden hole for every asset that page
             // loads; a mobile-money charge prompts the phone exactly as Daraja does.
             return $body['mobile_money']['provider'] === 'mpesa'
-                && $body['mobile_money']['phone'] === '254712345678'
+                // E.164 with the plus. Paystack rejects both the local form and the
+                // plain 2547… that Daraja requires. Verified against their API.
+                && $body['mobile_money']['phone'] === '+254712345678'
                 // Paystack works in the currency's smallest unit.
                 && $body['amount'] === 2000
                 && $body['currency'] === 'KES';
@@ -397,6 +399,20 @@ class PaystackTest extends TestCase
             ->get(route('settings.mpesa'))
             ->assertOk()
             ->assertDontSee($this->secret);
+    }
+
+    #[Test]
+    public function the_number_is_stored_internationally_whatever_the_provider_wanted(): void
+    {
+        $this->configurePaystack();
+
+        Http::fake(['api.paystack.co/charge' => Http::response(['status' => true, 'data' => ['reference' => 'r']])]);
+
+        $payment = app(PaymentCollector::class)->collect($this->plan, $this->router, '0712345678');
+
+        // Two payments from one phone must look like one customer, whichever provider took
+        // them, so the stored form does not follow the wire format.
+        $this->assertSame('254712345678', $payment->phone);
     }
 
     protected function pendingPayment(): Payment

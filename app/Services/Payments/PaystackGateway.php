@@ -55,7 +55,10 @@ class PaystackGateway implements PaymentGateway
                 'currency' => $configuration->currency,
                 'reference' => $reference,
                 'mobile_money' => [
-                    'phone' => $normalised,
+                    // E.164 with the plus. Paystack rejects both 2547XXXXXXXX — which is
+                    // exactly what Daraja insists on — and the local 07XXXXXXXX, as an
+                    // "invalid phone number format".
+                    'phone' => PhoneNumber::e164($normalised),
                     'provider' => 'mpesa',
                 ],
                 'metadata' => [
@@ -70,8 +73,19 @@ class PaystackGateway implements PaymentGateway
         $body = $response->json() ?? [];
 
         if (! $response->successful() || ($body['status'] ?? false) !== true) {
+            // The useful reason is nested. A declined charge answers with a top-level message
+            // of "Charge attempted", which says nothing, while data.message carries the actual
+            // cause — the wrong test number, an unsupported channel, and so on.
             return ChargeResult::rejected(
-                (string) ($body['message'] ?? __('Paystack declined the request.')),
+                (string) ($body['data']['message'] ?? $body['message'] ?? __('Paystack declined the request.')),
+                $body,
+            );
+        }
+
+        // A 200 with a failed charge inside it is still a refusal.
+        if (($body['data']['status'] ?? null) === 'failed') {
+            return ChargeResult::rejected(
+                (string) ($body['data']['message'] ?? __('Paystack declined the request.')),
                 $body,
             );
         }

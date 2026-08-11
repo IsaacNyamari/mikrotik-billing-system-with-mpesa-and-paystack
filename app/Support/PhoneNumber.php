@@ -25,4 +25,29 @@ class PhoneNumber
             default => $digits,
         };
     }
+
+    /**
+     * The same number written the local way, 07XXXXXXXX.
+     */
+    public static function local(string $phone): string
+    {
+        $normalised = self::normalise($phone);
+
+        return str_starts_with($normalised, '254')
+            ? '0'.substr($normalised, 3)
+            : $normalised;
+    }
+
+    /**
+     * E.164, with the leading plus: +2547XXXXXXXX.
+     *
+     * Providers disagree about this and are not forgiving. Daraja wants 2547XXXXXXXX with no
+     * plus; Paystack rejects both that and the local 07XXXXXXXX as an "invalid phone number
+     * format" and accepts only this. Verified against Paystack's own API rather than inferred.
+     * Storage stays on normalise(), so the same phone is one customer whoever collected.
+     */
+    public static function e164(string $phone): string
+    {
+        return '+'.self::normalise($phone);
+    }
 }
