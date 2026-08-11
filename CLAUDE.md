@@ -232,6 +232,17 @@ pay from their phone, and are logged in without ever typing a username.
 - Phone numbers are normalised by `App\Support\PhoneNumber`, not by the gateway, so the stored
   number is comparable no matter how the customer typed it.
 
+### Credentials are per ISP, in the database
+
+Every tenant collects into its own till, so `mpesa_configurations` is tenant-owned: one row per
+ISP (`unique(tenant_id)`), `BelongsToTenant`, credentials `encrypted` and `#[Hidden]`, and a
+`callback_token` that is unique platform-wide. An ISP enters its own through **Settings → M-PESA**
+and never sees another's.
+
+`.env` and `php artisan mpesa:configure` hold room for exactly **one** set, so they are a
+development and first-run convenience only — never the source of truth. Nothing outside that
+command reads M-PESA credentials from config.
+
 ### Scheduled work (`routes/console.php`)
 
 - `hotspot:sweep --retry` every minute — removes spent packages, and re-pushes ones that were paid

@@ -8,7 +8,12 @@ use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Console\Command;
 
 /**
- * Sets an ISP's M-PESA credentials from the environment.
+ * Bootstraps one ISP's M-PESA credentials from the environment.
+ *
+ * This is a development and first-run convenience, not how the platform is meant to be used:
+ * every ISP holds its own credentials in the database, entered through Settings → M-PESA, and
+ * .env has room for exactly one set. Reach for this when standing up a sandbox; leave real
+ * ISPs to enter their own, which is the only way that scales past the first tenant.
  *
  * Credentials are read from .env rather than passed as arguments so they do not end up in
  * shell history. Safaricom's published sandbox short code and passkey are used as defaults,
@@ -20,7 +25,7 @@ class MpesaConfigureCommand extends Command
         {--tenant= : ISP slug. Required when more than one exists.}
         {--live : Use the production Daraja endpoints instead of sandbox.}';
 
-    protected $description = 'Set up M-PESA credentials for an ISP from environment variables';
+    protected $description = 'Bootstrap one ISP\'s M-PESA credentials from .env (ISPs normally use Settings → M-PESA)';
 
     public function handle(): int
     {
