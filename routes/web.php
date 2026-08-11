@@ -59,6 +59,10 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
     Route::livewire('routers/{router}', 'pages::routers.show')->name('routers.show');
     Route::livewire('routers/{router}/edit', 'pages::routers.form')->name('routers.edit');
 
+    // The one thing that cannot be done over the API, because a router behind NAT has no API
+    // to do it over. Carried by a person and pasted into the device.
+    Route::livewire('routers/{router}/setup', 'pages::routers.setup')->name('routers.setup');
+
     Route::livewire('plans', 'pages::plans.index')->name('plans.index');
     Route::livewire('plans/create', 'pages::plans.form')->name('plans.create');
     Route::livewire('plans/{plan}/edit', 'pages::plans.form')->name('plans.edit');

@@ -54,7 +54,9 @@ use Illuminate\Support\Str;
     'location',
     'notes',
 ])]
-#[Hidden(['api_password'])]
+// The tunnel's private key is as sensitive as the API password: it is the router's identity
+// on the management network.
+#[Hidden(['api_password', 'wg_private_key'])]
 class Router extends Model
 {
     /** @use HasFactory<RouterFactory> */
@@ -89,9 +91,32 @@ class Router extends Model
             // The API password is needed in cleartext to authenticate against RouterOS, so it
             // is encrypted at rest rather than hashed.
             'api_password' => 'encrypted',
+            // The router's identity on the management network, and needed in cleartext to
+            // write into the setup script.
+            'wg_private_key' => 'encrypted',
             'uses_tls' => 'boolean',
             'last_seen_at' => 'datetime',
+            'wg_configured_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Whether this router has been given a place on the management network.
+     */
+    public function hasTunnel(): bool
+    {
+        return $this->wg_address !== null && $this->wg_public_key !== null;
+    }
+
+    /**
+     * Whether the platform reaches this router over the tunnel rather than over the internet.
+     *
+     * The specification is emphatic that the API must never be exposed publicly when a
+     * management tunnel is available, so this is what tells the two situations apart.
+     */
+    public function reachedOverTunnel(): bool
+    {
+        return $this->hasTunnel() && $this->host === $this->wg_address;
     }
 
     /**
