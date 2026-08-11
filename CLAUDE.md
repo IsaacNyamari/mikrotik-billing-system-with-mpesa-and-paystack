@@ -215,8 +215,8 @@ pay from their phone, and are logged in without ever typing a username.
   gives away neither the tenant nor a sequential id. The portal is unauthenticated, so it resolves
   the tenant itself with `Tenancy::withoutScope()` and then binds it. It rebinds on `hydrate()`,
   because no middleware can do it for a request with nobody signed in.
-- **Access is granted on a verified callback, never on the STK push being accepted.** The push
-  only means Safaricom agreed to ring the phone.
+- **Access is granted on a verified result, never on the push being accepted.** The push only
+  means the provider agreed to ring the phone.
 - Safaricom does not sign callbacks. The unguessable `callback_token` in the URL is what
   identifies the ISP, and the endpoint is CSRF-exempt (`bootstrap/app.php`).
 - The callback **always answers 200**, including for an unknown token or a malformed body: a
@@ -231,6 +231,31 @@ pay from their phone, and are logged in without ever typing a username.
 - Daraja rejects decimal amounts, so prices are rounded **up** — rounding down would undercharge.
 - Phone numbers are normalised by `App\Support\PhoneNumber`, not by the gateway, so the stored
   number is comparable no matter how the customer typed it.
+
+### Asking, not only being told
+
+A webhook only arrives if the provider can reach this installation — which it cannot from a
+laptop, from behind NAT, or when the tunnel is down. Waiting for one leaves a customer holding
+the M-PESA confirmation SMS while the page spins, so **the portal asks the provider outright on
+every poll** through `PaymentReconciler`.
+
+- This is not a weakening of the verified-result rule: it *is* a verification, from the same
+  provider, carrying the same facts its callback would.
+- `PaymentGateway::verify()` returns a `VerificationResult` — the status the payment should
+  take, or `null` when the provider did not say. An outage or an unrecognised answer settles
+  **nothing**; only a provider's own conclusion does.
+- Each gateway reads its own provider's shape, and the same reading serves both the webhook and
+  the poll — otherwise whichever arrived first would decide what the customer is told.
+- `PaymentStatus::Cancelled` is kept apart from `Failed`. The customer pressed cancel a second
+  ago; a page calling it a failure reads as the page being broken. Daraja says so with
+  `ResultCode` 1032, Paystack only in the wording of `gateway_response`.
+- Daraja carries a **20-second grace** before it is asked (`verificationGraceSeconds()`): its
+  query reports whether the money moved but not the M-PESA code, and that code is what the login
+  is named after. Paystack's answer is complete, so it is asked at once.
+- Reconciling takes a per-payment cache lock, and `settle()`/`close()` re-read the row before
+  writing. A webhook and a poll landing together must not issue two logins for one purchase.
+- `payments:reconcile` runs every minute for the customers who closed the tab. Their money moved
+  too, so their purchase still has to be recorded and their login still has to exist.
 
 ### Two providers, one contract
 
@@ -248,6 +273,22 @@ were never asked.
 - Paystack amounts are in the currency's smallest unit, so KES goes over as cents.
 - Paystack requires an email per charge and a walk-in has only given a phone, so one is derived
   from the number against a configured domain.
+- The M-PESA code is in **`data.receipt_number`** — confirmed against a real settled charge.
+  `authorization.mobile_money_number` is the *payer's own phone number*: using it as the receipt
+  names the customer's login after their phone number, which is both wrong and theirs to keep
+  private.
+
+### What the customer is told, and what the ISP is told
+
+The provider's own wording reaches the portal only when it describes what happened on the
+customer's phone — "insufficient funds" tells them exactly what to do next. A failure from before
+the prompt was ever sent is not about them, and `Payment::reachedTheCustomer()` (a provider handle
+exists at all) is what tells the two apart.
+
+Paystack refusing a charge with `type: api_error` / `code: unprocessed_transaction`, an outage, or
+an ISP's half-finished setup all land in that second group: the customer gets a plain instruction,
+the provider's exact words stay on the payment row, and `PaymentCollector` logs them. Showing the
+setup ones would also tell a stranger on the wifi about the ISP's own configuration.
 
 `DarajaPaymentGateway` is a thin adapter over the existing M-PESA code rather than a rewrite:
 that path is the one proven against a real Safaricom account.
@@ -280,13 +321,36 @@ Two values reach a stylesheet, so both are guarded rather than escaped:
   column narrow enough that a longer injection cannot be stored at all.
 - `custom_css` has angle brackets stripped, so it cannot close the element and open a script.
 
-Button text colour is chosen from the brand colour's luminance, so an ISP picking pale yellow
-does not end up with white text nobody can read.
+Button and badge text colours are chosen from each colour's luminance, so an ISP picking pale
+yellow does not end up with white text nobody can read. `accent_color` is optional and falls back
+to a darker step of the brand colour — a page whose badges were a colour nobody chose would look
+like an accident.
+
+### The buying flow is two taps
+
+Packages are **tiles**, two to a row on a phone, each with a badge carrying its validity, the
+price, and one instruction. The wording of that instruction (`buy_button_text`), what the money is
+called (`currency_label`), the banner, the tile style and one-per-row versus tiles are all per
+ISP — a HotSpot's front page is the whole of what most customers ever see of the ISP.
+
+- **Tapping a package chooses it; the number is asked for on the next screen.** Someone holding a
+  phone in one hand is asked one thing at a time, and their number is worth asking for only once
+  they have decided what they are buying.
+- `choose()` reads from the same list the page offered, so an id typed into the wire cannot buy a
+  package this ISP withheld or never sold.
+- **Once paid, the credentials are posted to the router immediately, with nothing to press.**
+  Asking someone who has just paid to confirm that they want what they bought is how people end
+  up stranded on a page. A manual button exists but stays hidden unless the automatic post has
+  not navigated away after four seconds.
+- Paid but no login yet means the router was unreachable when the money landed. The portal keeps
+  polling and retries issuing it rather than making anyone pay twice.
 
 ### Scheduled work (`routes/console.php`)
 
 - `hotspot:sweep --retry` every minute — removes spent packages, and re-pushes ones that were paid
   for while a router was down. A package that expired while stuck is *not* resurrected.
+- `payments:reconcile` every minute — asks each provider what became of payments still waiting,
+  for the customers who paid and then closed the page.
 - `router:test` every five minutes — keeps device health honest and records outages.
 
 The scheduler must actually be running: `php artisan schedule:work`.

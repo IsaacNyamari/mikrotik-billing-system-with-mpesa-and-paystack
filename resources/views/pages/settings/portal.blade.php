@@ -24,7 +24,14 @@ new #[Title('Portal appearance')] class extends Component {
     public string $support_phone = '';
     public string $terms_url = '';
     public string $primary_color = PortalSetting::DEFAULT_PRIMARY;
+    public string $accent_color = '';
     public string $color_scheme = 'auto';
+    public string $layout = PortalSetting::LAYOUT_GRID;
+    public string $card_style = 'tinted';
+    public bool $show_banner = true;
+    public string $banner_text = '';
+    public string $buy_button_text = '';
+    public string $currency_label = '';
     public bool $show_speed = true;
     public bool $show_data_cap = true;
     public string $custom_css = '';
@@ -46,7 +53,16 @@ new #[Title('Portal appearance')] class extends Component {
             'support_phone' => (string) $setting->support_phone,
             'terms_url' => (string) $setting->terms_url,
             'primary_color' => $setting->primary(),
+            // Blank rather than the derived shade: an empty field is what "follows the brand
+            // colour" looks like, and pre-filling it would freeze today's derived value.
+            'accent_color' => (string) $setting->accent_color,
             'color_scheme' => $setting->color_scheme,
+            'layout' => $setting->layout,
+            'card_style' => $setting->card_style,
+            'show_banner' => $setting->show_banner,
+            'banner_text' => (string) $setting->banner_text,
+            'buy_button_text' => (string) $setting->buy_button_text,
+            'currency_label' => (string) $setting->currency_label,
             'show_speed' => $setting->show_speed,
             'show_data_cap' => $setting->show_data_cap,
             'custom_css' => (string) $setting->custom_css,
@@ -83,7 +99,14 @@ new #[Title('Portal appearance')] class extends Component {
             'terms_url' => ['nullable', 'url', 'max:255'],
             // Written straight into a stylesheet, so nothing but a hex colour is accepted.
             'primary_color' => ['required', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'accent_color' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'color_scheme' => ['required', Rule::in(['auto', 'light', 'dark'])],
+            'layout' => ['required', Rule::in([PortalSetting::LAYOUT_GRID, PortalSetting::LAYOUT_LIST])],
+            'card_style' => ['required', Rule::in(['tinted', 'plain'])],
+            'show_banner' => ['boolean'],
+            'banner_text' => ['nullable', 'string', 'max:80'],
+            'buy_button_text' => ['nullable', 'string', 'max:40'],
+            'currency_label' => ['nullable', 'string', 'max:8'],
             'show_speed' => ['boolean'],
             'show_data_cap' => ['boolean'],
             'custom_css' => ['nullable', 'string', 'max:5000'],
@@ -121,7 +144,16 @@ new #[Title('Portal appearance')] class extends Component {
             'support_phone' => $this->blankToNull($validated['support_phone'] ?? null),
             'terms_url' => $this->blankToNull($validated['terms_url'] ?? null),
             'primary_color' => strtolower($validated['primary_color']),
+            'accent_color' => $this->blankToNull($validated['accent_color'] ?? null) === null
+                ? null
+                : strtolower((string) $validated['accent_color']),
             'color_scheme' => $validated['color_scheme'],
+            'layout' => $validated['layout'],
+            'card_style' => $validated['card_style'],
+            'show_banner' => $validated['show_banner'],
+            'banner_text' => $this->blankToNull($validated['banner_text'] ?? null),
+            'buy_button_text' => $this->blankToNull($validated['buy_button_text'] ?? null),
+            'currency_label' => $this->blankToNull($validated['currency_label'] ?? null),
             'show_speed' => $validated['show_speed'],
             'show_data_cap' => $validated['show_data_cap'],
             'custom_css' => $this->blankToNull($validated['custom_css'] ?? null),
@@ -185,7 +217,14 @@ new #[Title('Portal appearance')] class extends Component {
             'footer_text' => '',
             'terms_url' => '',
             'primary_color' => PortalSetting::DEFAULT_PRIMARY,
+            'accent_color' => '',
             'color_scheme' => 'auto',
+            'layout' => PortalSetting::LAYOUT_GRID,
+            'card_style' => 'tinted',
+            'show_banner' => true,
+            'banner_text' => '',
+            'buy_button_text' => '',
+            'currency_label' => '',
             'show_speed' => true,
             'show_data_cap' => true,
             'custom_css' => '',
@@ -213,6 +252,30 @@ new #[Title('Portal appearance')] class extends Component {
     public function previewOnColor(): string
     {
         return (new PortalSetting(['primary_color' => $this->previewColor]))->onPrimary();
+    }
+
+    /**
+     * The accent as the portal would work it out — the picked colour, or one derived from the
+     * brand colour when the operator has left it blank.
+     */
+    #[Computed]
+    public function previewAccent(): string
+    {
+        return $this->previewSetting()->accent();
+    }
+
+    #[Computed]
+    public function previewOnAccent(): string
+    {
+        return $this->previewSetting()->onAccent();
+    }
+
+    protected function previewSetting(): PortalSetting
+    {
+        return new PortalSetting([
+            'primary_color' => $this->previewColor,
+            'accent_color' => preg_match('/^#[0-9a-fA-F]{6}$/', $this->accent_color) === 1 ? $this->accent_color : null,
+        ]);
     }
 
     protected function blankToNull(?string $value): ?string
@@ -300,6 +363,79 @@ new #[Title('Portal appearance')] class extends Component {
                             <flux:select.option value="dark">{{ __('Always dark') }}</flux:select.option>
                         </flux:select>
                     </div>
+
+                    <div>
+                        <flux:label>{{ __('Accent colour') }}</flux:label>
+                        <flux:text size="sm" class="opacity-70">
+                            {{ __('Used on the banner and the badge over each package. Leave blank to follow your brand colour.') }}
+                        </flux:text>
+                        <div class="mt-1.5 flex items-center gap-2">
+                            <input
+                                type="color"
+                                wire:model.live="accent_color"
+                                class="size-10 shrink-0 cursor-pointer rounded border border-zinc-300 bg-transparent dark:border-zinc-600"
+                                aria-label="{{ __('Accent colour') }}"
+                            >
+                            <flux:input wire:model.live.debounce.400ms="accent_color" class="font-mono" placeholder="{{ __('Automatic') }}" />
+                            @if ($accent_color !== '')
+                                <flux:button size="sm" variant="ghost" type="button" wire:click="$set('accent_color', '')">
+                                    {{ __('Clear') }}
+                                </flux:button>
+                            @endif
+                        </div>
+                        @error('accent_color')
+                            <flux:text size="sm" class="mt-1 text-red-600">{{ $message }}</flux:text>
+                        @enderror
+                    </div>
+                </flux:card>
+
+                <flux:card class="flex flex-col gap-5">
+                    <div>
+                        <flux:heading size="lg">{{ __('Layout') }}</flux:heading>
+                        <flux:subheading>
+                            {{ __('How the packages are arranged, and what the buttons on them say.') }}
+                        </flux:subheading>
+                    </div>
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <flux:select wire:model.live="layout" :label="__('Packages')">
+                            <flux:select.option value="grid">{{ __('Tiles, two to a row') }}</flux:select.option>
+                            <flux:select.option value="list">{{ __('One per row') }}</flux:select.option>
+                        </flux:select>
+
+                        <flux:select wire:model.live="card_style" :label="__('Tile style')">
+                            <flux:select.option value="tinted">{{ __('Coloured') }}</flux:select.option>
+                            <flux:select.option value="plain">{{ __('White with a coloured button') }}</flux:select.option>
+                        </flux:select>
+                    </div>
+
+                    <flux:input
+                        wire:model.live.debounce.400ms="buy_button_text"
+                        :label="__('Button on each package')"
+                        :placeholder="__('Click Here To Connect')"
+                        :description="__('An instruction reads better here than a price — it is the one thing a customer has to understand unaided.')"
+                    />
+
+                    <flux:input
+                        wire:model.live.debounce.400ms="currency_label"
+                        :label="__('What to call the money')"
+                        :placeholder="$this->setting->displayCurrency()"
+                        :description="__('“Ksh” reads as local where a currency code reads as a bank statement.')"
+                    />
+
+                    <flux:switch
+                        wire:model.live="show_banner"
+                        :label="__('Show the banner')"
+                        :description="__('The coloured strip above the packages.')"
+                    />
+
+                    @if ($show_banner)
+                        <flux:input
+                            wire:model.live.debounce.400ms="banner_text"
+                            :label="__('Banner wording')"
+                            :placeholder="$this->setting->displayBannerText()"
+                        />
+                    @endif
                 </flux:card>
 
                 <flux:card class="flex flex-col gap-5">
@@ -405,32 +541,57 @@ new #[Title('Portal appearance')] class extends Component {
                         @endif
                     </div>
 
-                    <div
-                        @class([
-                            'mt-3 flex items-center gap-3 rounded-lg border-2 p-3',
-                            'bg-zinc-900' => $color_scheme === 'dark',
-                            'bg-white' => $color_scheme !== 'dark',
-                        ])
-                        style="border-color: {{ $this->previewColor }}"
-                    >
-                        <div class="size-4 shrink-0 rounded-full" style="background: {{ $this->previewColor }}"></div>
-                        <div class="flex-1 text-xs">
-                            <p @class(['font-semibold', 'text-white' => $color_scheme === 'dark', 'text-zinc-900' => $color_scheme !== 'dark'])>
-                                {{ __('1 Hour') }}
-                            </p>
-                            <p class="text-zinc-500">
-                                1 hour@if ($show_speed) &middot; 5 Mbps down@endif
-                                @if ($show_data_cap) &middot; 500 MB @endif
-                            </p>
+                    @if ($show_banner)
+                        <div
+                            class="mt-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold"
+                            style="background: linear-gradient(100deg, {{ $this->previewAccent }}, {{ $this->previewColor }}); color: {{ $this->previewOnAccent }}"
+                        >
+                            {{ $banner_text !== '' ? $banner_text : $this->setting->displayBannerText() }}
                         </div>
-                        <span @class(['text-sm font-bold', 'text-white' => $color_scheme === 'dark', 'text-zinc-900' => $color_scheme !== 'dark'])>20</span>
-                    </div>
+                    @endif
 
-                    <div
-                        class="mt-3 rounded-lg py-2.5 text-center text-sm font-semibold"
-                        style="background: {{ $this->previewColor }}; color: {{ $this->previewOnColor }}"
-                    >
-                        {{ __('Pay with M-PESA') }}
+                    {{-- Two packages, laid out exactly as the portal lays them out, so an
+                         operator is choosing between things they can see rather than words. --}}
+                    <div @class(['mt-4 grid gap-2', 'grid-cols-2' => $layout === 'grid'])>
+                        @foreach ([['1 hour', 20], ['1 week', 130]] as [$validity, $price])
+                            <div
+                                @class([
+                                    'relative rounded-xl border px-2 pb-2 pt-4 text-center',
+                                    'bg-zinc-900' => $color_scheme === 'dark' && $card_style === 'plain',
+                                    'bg-white' => $color_scheme !== 'dark' && $card_style === 'plain',
+                                ])
+                                @style([
+                                    'border-color: '.$this->previewColor.'44',
+                                    'background: linear-gradient(180deg, '.$this->previewColor.'2b, '.$this->previewColor.'0a)' => $card_style === 'tinted',
+                                ])
+                            >
+                                <span
+                                    class="absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+                                    style="background: {{ $this->previewAccent }}; color: {{ $this->previewOnAccent }}"
+                                >{{ $validity }}</span>
+
+                                <p @class(['text-xl font-extrabold', 'text-white' => $color_scheme === 'dark', 'text-zinc-900' => $color_scheme !== 'dark'])>
+                                    <span class="text-[10px] font-semibold opacity-70">
+                                        {{ $currency_label !== '' ? $currency_label : $this->setting->displayCurrency() }}
+                                    </span>{{ $price }}
+                                </p>
+
+                                <p class="text-[11px] text-zinc-500">
+                                    {{ $validity }}@if ($show_speed) &middot; 5 Mbps @endif
+                                    @if ($show_data_cap) &middot; 500 MB @endif
+                                </p>
+
+                                <div
+                                    class="mt-2 truncate rounded-full px-2 py-1 text-[10px] font-bold"
+                                    @style([
+                                        'background: #fff; color: '.$this->previewColor => $card_style === 'tinted',
+                                        'background: '.$this->previewColor.'; color: '.$this->previewOnColor => $card_style !== 'tinted',
+                                    ])
+                                >
+                                    {{ $buy_button_text !== '' ? $buy_button_text : $this->setting->displayBuyLabel() }}
+                                </div>
+                            </div>
+                        @endforeach
                     </div>
 
                     @if ($footer_text !== '')

@@ -1,11 +1,12 @@
 <?php
 
 use App\Enums\PaymentStatus;
-use App\Models\MpesaConfiguration;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Router;
+use App\Services\Mpesa\CallbackProcessor;
 use App\Services\Mpesa\PaymentCollector;
+use App\Services\Payments\PaymentReconciler;
 use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -133,13 +134,57 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     /**
      * Whether this ISP can take money right now.
      *
-     * An ISP that has not finished setting up M-PESA is an ordinary state, not an error, so
-     * the portal says so plainly rather than offering a button that cannot work.
+     * Asked of the gateway manager rather than of M-PESA directly: an ISP collecting through
+     * Paystack has no Daraja row at all, and checking for one would tell its customers that
+     * payments are not set up while they demonstrably are. An ISP that has finished setting up
+     * neither is an ordinary state, not an error, so the portal says so plainly rather than
+     * offering a button that cannot work.
      */
     #[Computed]
     public function canTakePayment(): bool
     {
-        return MpesaConfiguration::query()->where('is_active', true)->exists();
+        return app(\App\Services\Payments\PaymentGatewayManager::class)->active() !== null;
+    }
+
+    /**
+     * The package the customer tapped.
+     */
+    #[Computed]
+    public function selectedPlan(): ?Plan
+    {
+        return $this->selectedPlanId === null ? null : $this->plans->firstWhere('id', $this->selectedPlanId);
+    }
+
+    /**
+     * Tapping a package's button.
+     *
+     * Choosing and paying are two taps rather than one form: a customer holding a phone in one
+     * hand should be asked for exactly one thing at a time, and the number is worth asking for
+     * only once they have decided what they are buying.
+     */
+    public function choose(int $planId): void
+    {
+        // Read from the same list the page offered, so an id typed into the wire cannot buy a
+        // package this ISP has withdrawn or never sold.
+        if ($this->plans->firstWhere('id', $planId) === null) {
+            return;
+        }
+
+        $this->selectedPlanId = $planId;
+        $this->resetErrorBag();
+
+        unset($this->selectedPlan);
+    }
+
+    /**
+     * Back to the packages, having thought better of it.
+     */
+    public function changePlan(): void
+    {
+        $this->reset(['selectedPlanId']);
+        $this->resetErrorBag();
+
+        unset($this->selectedPlan);
     }
 
     public function pay(PaymentCollector $collector): void
@@ -179,19 +224,48 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
 
     /**
      * Called by wire:poll while the customer is on their phone.
+     *
+     * Asks the provider outright rather than hoping a webhook turns up. The webhook is the
+     * provider reaching us, which needs this installation to be reachable from the internet;
+     * this is us reaching the provider, which works from a laptop on a shop's wifi. A customer
+     * holding the M-PESA confirmation SMS should never be looking at a spinner.
      */
-    public function checkPayment(): void
+    public function checkPayment(PaymentReconciler $reconciler, CallbackProcessor $processor): void
     {
         unset($this->payment);
 
+        $payment = $this->payment;
+
+        if ($payment === null) {
+            return;
+        }
+
+        // Paid, but the access was never issued — the router was unreachable when the money
+        // landed. The money has moved, so keep trying rather than making them pay twice.
+        if ($payment->status === PaymentStatus::Paid) {
+            if ($payment->hotspot_user_id === null) {
+                $processor->grantAccess($payment);
+                unset($this->payment);
+            }
+
+            return;
+        }
+
+        if ($payment->status !== PaymentStatus::Pending) {
+            return;
+        }
+
+        $reconciler->reconcile($payment);
+
+        unset($this->payment);
         $payment = $this->payment;
 
         if ($payment === null || $payment->status !== PaymentStatus::Pending) {
             return;
         }
 
-        // Safaricom's prompt expires after about a minute. Waiting forever would leave the
-        // customer staring at a spinner.
+        // The prompt expires after about a minute. Waiting forever would leave the customer
+        // staring at a spinner for something that is never coming.
         if ($payment->created_at->addMinutes((int) config('mpesa.abandon_after_minutes'))->isPast()) {
             // Assigned rather than mass-updated: status is set by the payment flow, not by
             // input, so it is deliberately not fillable and update() would drop it.
@@ -205,7 +279,8 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     public function startOver(): void
     {
         $this->reset(['paymentId', 'selectedPlanId', 'phone']);
-        unset($this->payment);
+
+        unset($this->payment, $this->selectedPlan);
     }
 
     /**
@@ -251,26 +326,57 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
 
         @if ($loginUrl !== '')
             {{-- Posted straight to the MikroTik, which is what actually lets them online. The
-                 HotSpot profile accepts http-pap, so the credentials go as plain fields. --}}
+                 HotSpot profile accepts http-pap, so the credentials go as plain fields.
+
+                 Submitted the moment it renders, with nothing for the customer to press: they
+                 have paid, and being asked to confirm that they would like what they just bought
+                 is the kind of step that strands people on a page. --}}
             <form method="post" action="{{ $loginUrl }}" id="hotspot-login">
                 <input type="hidden" name="username" value="{{ $access->username }}">
                 <input type="hidden" name="password" value="{{ $access->password }}">
-                <button type="submit" class="btn">{{ __('Connect now') }}</button>
+
+                {{-- Revealed only if the submit below has not navigated away. Nobody sees it in
+                     the ordinary case; it exists so a browser that blocks the automatic post
+                     leaves the customer with a way through rather than a dead page. --}}
+                <button type="submit" class="btn" id="hotspot-login-fallback" hidden>
+                    {{ __('Tap to connect') }}
+                </button>
             </form>
 
             <script>
-                // Log them in without making them press anything. The button stays as the
-                // fallback for a browser that blocks this.
-                setTimeout(function () {
+                (function () {
                     var form = document.getElementById('hotspot-login');
-                    if (form) { form.submit(); }
-                }, 1200);
+
+                    if (! form) { return; }
+
+                    form.submit();
+
+                    // Still here a few seconds later means the post did not take.
+                    setTimeout(function () {
+                        var fallback = document.getElementById('hotspot-login-fallback');
+                        if (fallback) { fallback.hidden = false; }
+                    }, 4000);
+                })();
             </script>
         @else
             <div class="note note--warn">
                 <p class="note__text">{{ __('Now return to the wifi login page and sign in with the code above.') }}</p>
             </div>
         @endif
+    @elseif ($this->payment?->status === App\Enums\PaymentStatus::Paid)
+        {{-- The money arrived but the login has not been created yet, which means the router
+             was unreachable at that moment. Keep polling: checkPayment retries the issue, and
+             hotspot:sweep --retry is doing the same in the background. --}}
+        <div class="note note--good" wire:poll.3s="checkPayment">
+            <svg class="icon pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h2 class="note__title">{{ __('Payment received') }}</h2>
+            <p class="note__text">{{ __('Setting up your access…') }}</p>
+            @if ($this->payment->receipt)
+                <p class="code">{{ $this->payment->receipt }}</p>
+            @endif
+        </div>
     @elseif ($this->isWaiting)
         <div class="note note--plain" wire:poll.3s="checkPayment">
             <svg class="icon pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
@@ -284,61 +390,47 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         </div>
     @elseif ($this->payment && $this->payment->status->isSettled())
         <div class="note note--bad">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-                <circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6" stroke-linecap="round"/>
-            </svg>
-            <h2 class="note__title">{{ $this->payment->status->label() }}</h2>
-            <p class="note__text">{{ $this->payment->result_description ?? __('The payment did not go through.') }}</p>
+            @if ($this->payment->status === App\Enums\PaymentStatus::Cancelled)
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9"/><path d="M8 12h8" stroke-linecap="round"/>
+                </svg>
+                <h2 class="note__title">{{ __('Payment cancelled') }}</h2>
+            @else
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6" stroke-linecap="round"/>
+                </svg>
+                <h2 class="note__title">{{ $this->payment->status->label() }}</h2>
+            @endif
+
+            <p class="note__text">{{ $this->payment->customerMessage() }}</p>
             <button type="button" class="btn btn--quiet" style="margin-top:1rem" wire:click="startOver">
                 {{ __('Try again') }}
             </button>
         </div>
-    @else
-        @unless ($this->canTakePayment)
-            <div class="note note--warn">
-                <h2 class="note__title">{{ __('Payments are not set up yet') }}</h2>
-                <p class="note__text">{{ __('Please ask at the counter for access.') }}</p>
+    @elseif ($this->selectedPlan)
+        {{-- Second tap: they have chosen, so now — and only now — they are asked for a number. --}}
+        @php($plan = $this->selectedPlan)
+
+        <div class="card">
+            <div class="chosen">
+                <div>
+                    <p class="chosen__name" style="margin:0">{{ $plan->name }}</p>
+                    <p class="chosen__meta" style="margin:.125rem 0 0">
+                        {{ $plan->validityForHumans() }}@if ($this->branding->show_speed) &middot; {{ $plan->speedForHumans() }}@endif
+                    </p>
+                    <button type="button" class="link" style="margin-top:.375rem" wire:click="changePlan">
+                        {{ __('Change package') }}
+                    </button>
+                </div>
+
+                <p class="chosen__price" style="margin:0">
+                    <small style="font-size:.75rem;font-weight:600;opacity:.7">{{ $this->branding->displayCurrency($this->tenant) }}</small>
+                    {{ number_format((float) $plan->price, 0) }}
+                </p>
             </div>
-        @endunless
 
-        <form wire:submit="pay">
-            <fieldset class="plans">
-                <legend class="sr-only">{{ __('Packages') }}</legend>
-
-                @forelse ($this->plans as $plan)
-                    <label wire:key="plan-{{ $plan->id }}" @class(['plan', 'plan--on' => $selectedPlanId === $plan->id])>
-                        <input type="radio" wire:model.live="selectedPlanId" value="{{ $plan->id }}">
-
-                        <span class="plan__body">
-                            <span class="plan__name">{{ $plan->name }}</span>
-                            <span class="plan__meta" style="display:block">
-                                {{ $plan->validityForHumans() }}@if ($this->branding->show_speed) &middot; {{ $plan->speedForHumans() }}@endif
-                            </span>
-                            @if ($plan->data_cap_mb && $this->branding->show_data_cap)
-                                <span class="plan__meta" style="display:block">
-                                    {{ number_format($plan->data_cap_mb) }} MB {{ __('included') }}
-                                </span>
-                            @endif
-                        </span>
-
-                        <span class="plan__price">
-                            <span class="plan__amount">{{ number_format((float) $plan->price, 0) }}</span>
-                            <span class="plan__currency">{{ $this->tenant->currency }}</span>
-                        </span>
-                    </label>
-                @empty
-                    <div class="note note--plain">
-                        <p class="note__text">{{ __('No packages are on sale right now.') }}</p>
-                    </div>
-                @endforelse
-            </fieldset>
-
-            @error('selectedPlanId')
-                <p class="field__error" style="margin-top:.75rem">{{ $message }}</p>
-            @enderror
-
-            @if ($this->plans->isNotEmpty() && $this->canTakePayment)
-                <div class="field" style="margin-top:1.25rem">
+            <form wire:submit="pay">
+                <div class="field">
                     <label class="field__label" for="portal-phone">{{ __('M-PESA number') }}</label>
                     <input
                         id="portal-phone"
@@ -347,10 +439,14 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                         inputmode="numeric"
                         autocomplete="tel"
                         placeholder="07XX XXX XXX"
+                        autofocus
                         required
                         @class(['field__input', 'field__input--bad' => $errors->has('phone')])
                     >
                     @error('phone')
+                        <p class="field__error">{{ $message }}</p>
+                    @enderror
+                    @error('selectedPlanId')
                         <p class="field__error">{{ $message }}</p>
                     @enderror
                 </div>
@@ -366,11 +462,85 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                         <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" opacity=".25"/>
                         <path fill="currentColor" opacity=".75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
                     </svg>
-                    <span wire:loading.remove wire:target="pay">{{ __('Pay with M-PESA') }}</span>
+                    <span wire:loading.remove wire:target="pay">
+                        {{ __('Pay :currency :amount', [
+                            'currency' => $this->branding->displayCurrency($this->tenant),
+                            'amount' => number_format((float) $plan->price, 0),
+                        ]) }}
+                    </span>
                     <span wire:loading wire:target="pay">{{ __('Sending request…') }}</span>
                 </button>
-            @endif
-        </form>
+            </form>
+
+            <p class="chosen__meta" style="margin:.75rem 0 0;text-align:center">
+                {{ __('A prompt will come to this number. Enter your PIN to pay.') }}
+            </p>
+        </div>
+    @else
+        @if ($this->branding->show_banner && $this->plans->isNotEmpty())
+            <div class="banner">
+                <svg class="banner__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+                    <path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0" stroke-linecap="round"/>
+                    <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/>
+                </svg>
+                <span>{{ $this->branding->displayBannerText($this->tenant) }}</span>
+            </div>
+        @endif
+
+        @unless ($this->canTakePayment)
+            <div class="note note--warn">
+                <h2 class="note__title">{{ __('Payments are not set up yet') }}</h2>
+                <p class="note__text">{{ __('Please ask at the counter for access.') }}</p>
+            </div>
+        @endunless
+
+        @if ($this->plans->isEmpty())
+            <div class="note note--plain">
+                <p class="note__text">{{ __('No packages are on sale right now.') }}</p>
+            </div>
+        @else
+            <div @class(['deals', 'deals--list' => ! $this->branding->usesGrid()])>
+                @foreach ($this->plans as $plan)
+                    <div
+                        wire:key="plan-{{ $plan->id }}"
+                        @class(['deal', 'deal--tinted' => $this->branding->isTinted(), 'deal--plain' => ! $this->branding->isTinted()])
+                    >
+                        <span class="deal__badge">{{ $plan->validityForHumans() }}</span>
+
+                        <div class="deal__body">
+                            <p class="deal__price">
+                                <small>{{ $this->branding->displayCurrency($this->tenant) }}</small>{{ number_format((float) $plan->price, 0) }}
+                            </p>
+
+                            <p class="deal__meta">{{ $plan->name }}</p>
+
+                            @if ($plan->description)
+                                <p class="deal__meta">{{ $plan->description }}</p>
+                            @endif
+
+                            @if ($this->branding->show_speed)
+                                <p class="deal__meta">{{ $plan->speedForHumans() }}</p>
+                            @endif
+
+                            @if ($plan->data_cap_mb && $this->branding->show_data_cap)
+                                <p class="deal__meta">{{ number_format($plan->data_cap_mb) }} MB {{ __('included') }}</p>
+                            @endif
+                        </div>
+
+                        {{-- One tap chooses; the number is asked for on the next screen. --}}
+                        <button
+                            type="button"
+                            class="deal__cta"
+                            wire:click="choose({{ $plan->id }})"
+                            wire:loading.attr="disabled"
+                            @disabled(! $this->canTakePayment)
+                        >
+                            {{ $this->branding->displayBuyLabel() }}
+                        </button>
+                    </div>
+                @endforeach
+            </div>
+        @endif
     @endif
 
     <footer class="portal__foot">

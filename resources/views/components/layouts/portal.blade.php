@@ -30,6 +30,9 @@
                 --brand-dark: {{ $portal->primaryDark() }};
                 --on-brand: {{ $portal->onPrimary() }};
                 --brand-channels: {{ $portal->primaryChannels() }};
+                --accent: {{ $portal->accent() }};
+                --on-accent: {{ $portal->onAccent() }};
+                --accent-channels: {{ $portal->accentChannels() }};
             }
 
             *, *::before, *::after { box-sizing: border-box; }
@@ -56,23 +59,74 @@
 
             .card { background: #fff; border: 1px solid #e4e4e7; border-radius: .75rem; padding: 1.25rem; box-shadow: 0 1px 2px rgb(0 0 0 / .04); }
 
-            /* Plans ------------------------------------------------------------------ */
-            .plans { display: flex; flex-direction: column; gap: .75rem; margin: 0; padding: 0; border: 0; }
-            .plan {
-                display: flex; align-items: center; gap: 1rem; cursor: pointer;
-                background: #fff; border: 1px solid #e4e4e7; border-radius: .75rem; padding: 1rem;
-                box-shadow: 0 1px 2px rgb(0 0 0 / .04);
-                transition: border-color .15s, box-shadow .15s;
+            /* Banner ----------------------------------------------------------------- */
+            /* The strip a customer reads first, confirming they are on the network whose name
+               they just tapped. */
+            .banner {
+                display: flex; align-items: center; gap: .625rem;
+                padding: .875rem 1rem; border-radius: .75rem;
+                background: linear-gradient(100deg, var(--accent), var(--brand));
+                color: var(--on-accent);
+                font-weight: 650; font-size: .9375rem;
             }
-            .plan:hover { border-color: #d4d4d8; }
-            .plan--on { border-color: var(--brand); box-shadow: 0 0 0 3px rgb(var(--brand-channels) / .18); }
-            .plan input[type="radio"] { flex: none; width: 1.25rem; height: 1.25rem; accent-color: var(--brand); margin: 0; }
-            .plan__body { flex: 1 1 auto; min-width: 0; }
-            .plan__name { font-weight: 600; }
-            .plan__meta { font-size: .8125rem; color: #71717a; }
-            .plan__price { flex: none; text-align: right; }
-            .plan__amount { font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-            .plan__currency { display: block; font-size: .6875rem; color: #a1a1aa; }
+            .banner__icon { flex: none; width: 1.5rem; height: 1.5rem; }
+
+            /* Packages --------------------------------------------------------------- */
+            /* Tiles two to a row on a phone, three where there is room. The ISP can force a
+               single column instead. */
+            .deals { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: .75rem; }
+            .deals--list { grid-template-columns: 1fr; }
+
+            .deal {
+                display: flex; flex-direction: column; align-items: center; text-align: center;
+                padding: 1.375rem .75rem .75rem; border-radius: .875rem; position: relative;
+                background: #fff; border: 1px solid #e4e4e7;
+                box-shadow: 0 1px 2px rgb(0 0 0 / .04);
+            }
+            .deal--tinted {
+                background: linear-gradient(180deg, rgb(var(--brand-channels) / .16), rgb(var(--brand-channels) / .04));
+                border-color: rgb(var(--brand-channels) / .28);
+            }
+            /* The duration, straddling the top edge like a label on a packet. */
+            .deal__badge {
+                position: absolute; top: -.625rem; left: 50%; transform: translateX(-50%);
+                padding: .1875rem .625rem; border-radius: 999px; white-space: nowrap;
+                background: var(--accent); color: var(--on-accent);
+                font-size: .625rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+            }
+            .deal__price { margin: .25rem 0 0; font-size: 1.625rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+            .deal__price small { font-size: .75rem; font-weight: 600; opacity: .7; margin-right: .1875rem; }
+            .deal__meta { margin: .25rem 0 0; font-size: .75rem; color: #71717a; }
+            .deal__cta {
+                margin-top: .875rem; width: 100%; padding: .5rem .5rem;
+                font-family: inherit; font-size: .75rem; font-weight: 700; line-height: 1.3;
+                border-radius: 999px; cursor: pointer;
+                background: #fff; color: var(--brand); border: 1px solid rgb(var(--brand-channels) / .35);
+                transition: background .15s, color .15s, transform .1s;
+            }
+            .deal--plain .deal__cta { background: var(--brand); color: var(--on-brand); border-color: transparent; }
+            .deal__cta:hover { background: var(--brand); color: var(--on-brand); border-color: transparent; }
+            .deal__cta:active { transform: scale(.98); }
+            .deal__cta:disabled { opacity: .55; cursor: default; }
+
+            /* In a single column there is room to put the money beside the description
+               instead of under it. */
+            .deals--list .deal { flex-direction: row; align-items: center; text-align: left; gap: 1rem; padding: 1rem; }
+            .deals--list .deal__badge { position: static; transform: none; align-self: flex-start; }
+            .deals--list .deal__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: .125rem; }
+            .deals--list .deal__price { margin: 0; font-size: 1.375rem; }
+            .deals--list .deal__cta { margin: 0; width: auto; flex: none; padding: .5rem 1rem; }
+
+            /* The chosen package, restated above the phone field so nobody pays for the
+               wrong thing. */
+            .chosen { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+            .chosen__name { font-weight: 650; }
+            .chosen__meta { font-size: .8125rem; color: #71717a; }
+            .chosen__price { font-size: 1.375rem; font-weight: 800; white-space: nowrap; }
+            .link {
+                background: none; border: 0; padding: 0; font: inherit; font-size: .8125rem;
+                color: var(--brand); cursor: pointer; text-decoration: underline;
+            }
 
             /* Form ------------------------------------------------------------------- */
             .field { display: block; }
@@ -133,10 +187,15 @@
             @media (prefers-color-scheme: dark) {
 @endif
                 body { background: #09090b; color: #fafafa; }
-                .card, .plan, .note--plain { background: #18181b; border-color: #3f3f46; }
-                .plan:hover { border-color: #52525b; }
-                .plan--on { border-color: var(--brand); box-shadow: 0 0 0 3px rgb(var(--brand-channels) / .3); }
-                .portal__sub, .plan__meta { color: #a1a1aa; }
+                .card, .deal, .note--plain { background: #18181b; border-color: #3f3f46; }
+                .deal--tinted {
+                    background: linear-gradient(180deg, rgb(var(--brand-channels) / .22), rgb(var(--brand-channels) / .06));
+                    border-color: rgb(var(--brand-channels) / .35);
+                }
+                .deal__cta { background: #27272a; color: #fafafa; border-color: #52525b; }
+                .deal--plain .deal__cta { background: var(--brand); color: var(--on-brand); }
+                .deal__cta:hover { background: var(--brand); color: var(--on-brand); }
+                .portal__sub, .deal__meta, .chosen__meta { color: #a1a1aa; }
                 .field__label { color: #d4d4d8; }
                 .field__input { background: #18181b; border-color: #52525b; color: #fafafa; }
                 .field__input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgb(var(--brand-channels) / .3); }

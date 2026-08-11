@@ -26,7 +26,14 @@ use Illuminate\Support\Facades\Storage;
  * @property string|null $support_phone
  * @property string|null $terms_url
  * @property string|null $primary_color
+ * @property string|null $accent_color
  * @property string $color_scheme
+ * @property string $layout
+ * @property string $card_style
+ * @property bool $show_banner
+ * @property string|null $banner_text
+ * @property string|null $buy_button_text
+ * @property string|null $currency_label
  * @property bool $show_speed
  * @property bool $show_data_cap
  * @property string|null $custom_css
@@ -41,7 +48,14 @@ use Illuminate\Support\Facades\Storage;
     'support_phone',
     'terms_url',
     'primary_color',
+    'accent_color',
     'color_scheme',
+    'layout',
+    'card_style',
+    'show_banner',
+    'banner_text',
+    'buy_button_text',
+    'currency_label',
     'show_speed',
     'show_data_cap',
     'custom_css',
@@ -52,11 +66,20 @@ class PortalSetting extends Model
 
     public const DEFAULT_PRIMARY = '#2563eb';
 
+    /** Packages as tiles, two to a row on a phone. */
+    public const LAYOUT_GRID = 'grid';
+
+    /** Packages as stacked rows, for an ISP selling only a few. */
+    public const LAYOUT_LIST = 'list';
+
     /**
      * @var array<string, mixed>
      */
     protected $attributes = [
         'color_scheme' => 'auto',
+        'layout' => self::LAYOUT_GRID,
+        'card_style' => 'tinted',
+        'show_banner' => true,
         'show_speed' => true,
         'show_data_cap' => true,
     ];
@@ -67,6 +90,7 @@ class PortalSetting extends Model
     protected function casts(): array
     {
         return [
+            'show_banner' => 'boolean',
             'show_speed' => 'boolean',
             'show_data_cap' => 'boolean',
         ];
@@ -114,6 +138,52 @@ class PortalSetting extends Model
         return $this->support_phone ?: ($tenant ?? Tenancy::tenant())?->contact_phone;
     }
 
+    /**
+     * The strip across the top of the packages.
+     *
+     * Defaults to naming the network, which is what a customer who has just tapped a wifi name
+     * is looking for confirmation of.
+     */
+    public function displayBannerText(?Tenant $tenant = null): string
+    {
+        return $this->banner_text ?: __(':name Login Page', ['name' => $this->displayName($tenant)]);
+    }
+
+    /**
+     * What the button on each package says.
+     *
+     * Deliberately an instruction rather than a price: it is the one thing on the page a
+     * customer has to understand without being told.
+     */
+    public function displayBuyLabel(): string
+    {
+        return $this->buy_button_text ?: __('Click Here To Connect');
+    }
+
+    /**
+     * What to call the money.
+     *
+     * "Ksh" is what a Kenyan customer reads on every price they have ever seen; "KES" is what
+     * a bank statement says. The ISP's currency code stands in when nothing is set.
+     */
+    public function displayCurrency(?Tenant $tenant = null): string
+    {
+        return $this->currency_label ?: (string) (($tenant ?? Tenancy::tenant())->currency ?? 'KES');
+    }
+
+    public function usesGrid(): bool
+    {
+        return $this->layout !== self::LAYOUT_LIST;
+    }
+
+    /**
+     * Whether package tiles carry the brand colour or sit white with a brand button.
+     */
+    public function isTinted(): bool
+    {
+        return $this->card_style !== 'plain';
+    }
+
     public function logoUrl(): ?string
     {
         return $this->logo_path === null ? null : Storage::disk('public')->url($this->logo_path);
@@ -159,6 +229,34 @@ class PortalSetting extends Model
         [$r, $g, $b] = $this->channels($this->primary());
 
         return "{$r}, {$g}, {$b}";
+    }
+
+    /**
+     * The second colour, for badges and the banner.
+     *
+     * Falls back to a darker step of the brand colour rather than to a fixed one, so an ISP
+     * that never picks an accent still gets a page that looks deliberate.
+     */
+    public function accent(): string
+    {
+        $colour = (string) $this->accent_color;
+
+        return preg_match('/^#[0-9a-fA-F]{6}$/', $colour) === 1 ? $colour : $this->shade($this->primary(), -0.35);
+    }
+
+    public function accentChannels(): string
+    {
+        [$r, $g, $b] = $this->channels($this->accent());
+
+        return "{$r}, {$g}, {$b}";
+    }
+
+    /**
+     * Black or white, whichever is legible on the accent colour.
+     */
+    public function onAccent(): string
+    {
+        return $this->luminance($this->accent()) > 0.55 ? '#111827' : '#ffffff';
     }
 
     /**
