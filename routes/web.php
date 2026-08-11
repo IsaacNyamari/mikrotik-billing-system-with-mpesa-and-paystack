@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\HotspotPageController;
 use App\Http\Controllers\MpesaCallbackController;
 use Illuminate\Support\Facades\Route;
 
@@ -8,6 +9,12 @@ Route::view('/', 'welcome')->name('home');
 // Public, unauthenticated: a customer sitting on a HotSpot before they have paid for anything.
 // The portal key identifies which router — and so which ISP — they landed from.
 Route::livewire('p/{portalKey}', 'pages::portal.index')->name('portal');
+
+// Fetched by the router itself during hotspot:install-portal, then served from its own
+// storage to customers.
+Route::get('p/{portalKey}/mikrotik/{page}', HotspotPageController::class)
+    ->whereIn('page', ['login.html', 'alogin.html'])
+    ->name('portal.mikrotik');
 
 // Safaricom posts here. The token in the path is the only credential; CSRF is exempted for it
 // in bootstrap/app.php.
