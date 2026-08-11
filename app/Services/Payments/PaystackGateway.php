@@ -36,10 +36,19 @@ class PaystackGateway implements PaymentGateway
         }
 
         $normalised = PhoneNumber::normalise($phone);
+        $email = $configuration->emailFor($normalised);
+
+        if ($email === null) {
+            // Sending a malformed address gets a flat "invalid email" back from Paystack,
+            // which says nothing about which of our fields is wrong.
+            return ChargeResult::rejected(
+                __('Set a billing email under Settings → Payments before customers can pay with Paystack.'),
+            );
+        }
 
         try {
             $response = $this->client($configuration)->post('/charge', [
-                'email' => $configuration->emailFor($normalised),
+                'email' => $email,
                 // Paystack works in the currency's smallest unit, so KES goes over as cents.
                 // Rounding up rather than down, for the same reason as Daraja.
                 'amount' => (int) ceil((float) $plan->price) * 100,

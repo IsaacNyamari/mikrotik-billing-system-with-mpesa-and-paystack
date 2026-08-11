@@ -58,7 +58,7 @@ class PaystackTest extends TestCase
     {
         $configuration = PaystackConfiguration::query()->create([
             'secret_key' => $this->secret,
-            'receipt_domain' => 'demo-isp.test',
+            'billing_email' => 'demo-isp.test',
         ]);
 
         $this->tenant->payment_provider = PaymentProvider::Paystack->value;
@@ -118,6 +118,70 @@ class PaystackTest extends TestCase
         app(PaymentCollector::class)->collect($this->plan, $this->router, '0712345678');
 
         Http::assertSent(fn ($request): bool => $request->data()['email'] === '254712345678@demo-isp.test');
+    }
+
+    #[Test]
+    public function a_full_address_is_used_for_every_charge(): void
+    {
+        // What an ISP naturally types into a field about email. Deriving from it would build
+        // "2547…@billing@my-isp.co.ke", which Paystack rejects as an invalid email.
+        $this->configurePaystack();
+        PaystackConfiguration::query()->sole()->update(['billing_email' => 'billing@my-isp.co.ke']);
+
+        Http::fake(['api.paystack.co/charge' => Http::response(['status' => true, 'data' => ['reference' => 'r']])]);
+
+        app(PaymentCollector::class)->collect($this->plan, $this->router, '0712345678');
+
+        Http::assertSent(fn ($request): bool => $request->data()['email'] === 'billing@my-isp.co.ke');
+    }
+
+    #[Test]
+    public function an_unusable_billing_email_names_the_field_instead_of_reaching_paystack(): void
+    {
+        $this->configurePaystack();
+        PaystackConfiguration::query()->sole()->update(['billing_email' => 'not an email']);
+        $this->tenant->update(['contact_email' => null]);
+        Tenancy::set($this->tenant->fresh());
+
+        Http::fake();
+
+        $payment = app(PaymentCollector::class)->collect($this->plan, $this->router, '0712345678');
+
+        $this->assertSame(PaymentStatus::Failed, $payment->status);
+        $this->assertStringContainsString('billing email', (string) $payment->result_description);
+        // Paystack is never troubled with something it will only reject.
+        Http::assertNothingSent();
+    }
+
+    #[Test]
+    public function the_isps_own_address_stands_in_when_none_is_configured(): void
+    {
+        $this->configurePaystack();
+        PaystackConfiguration::query()->sole()->update(['billing_email' => null]);
+        $this->tenant->update(['contact_email' => 'owner@my-isp.co.ke']);
+        Tenancy::set($this->tenant->fresh());
+
+        Http::fake(['api.paystack.co/charge' => Http::response(['status' => true, 'data' => ['reference' => 'r']])]);
+
+        // Falling back beats failing the sale outright.
+        app(PaymentCollector::class)->collect($this->plan, $this->router, '0712345678');
+
+        Http::assertSent(fn ($request): bool => $request->data()['email'] === 'owner@my-isp.co.ke');
+    }
+
+    #[Test]
+    public function a_billing_email_that_is_neither_address_nor_domain_is_refused_on_the_form(): void
+    {
+        $owner = User::factory()->forTenant($this->tenant)->create();
+        $owner->assignRole(Roles::ISP_OWNER);
+
+        $this->actingAs($owner);
+
+        Livewire::test('pages::settings.mpesa')
+            ->set('paystack_secret_key', 'sk_test_liveonetwothree')
+            ->set('paystack_billing_email', 'not an email')
+            ->call('savePaystack')
+            ->assertHasErrors(['paystack_billing_email']);
     }
 
     #[Test]
@@ -295,6 +359,7 @@ class PaystackTest extends TestCase
 
         Livewire::test('pages::settings.mpesa')
             ->set('paystack_secret_key', 'sk_test_liveonetwothree')
+            ->set('paystack_billing_email', 'billing@my-isp.co.ke')
             ->call('savePaystack')
             ->assertHasNoErrors()
             ->call('chooseProvider', PaymentProvider::Paystack->value);

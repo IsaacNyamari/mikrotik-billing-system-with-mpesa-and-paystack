@@ -21,7 +21,7 @@ new #[Title('Payments')] class extends Component {
     // Paystack, for an ISP with no Daraja app of its own.
     public string $paystack_secret_key = '';
     public string $paystack_public_key = '';
-    public string $paystack_receipt_domain = '';
+    public string $paystack_billing_email = '';
 
     public string $environment = 'sandbox';
     public string $short_code = '';
@@ -48,7 +48,7 @@ new #[Title('Payments')] class extends Component {
 
         if ($paystack !== null) {
             $this->paystack_public_key = (string) $paystack->public_key;
-            $this->paystack_receipt_domain = (string) $paystack->receipt_domain;
+            $this->paystack_billing_email = (string) $paystack->billing_email;
         }
 
         $configuration = $this->configuration;
@@ -132,16 +132,19 @@ new #[Title('Payments')] class extends Component {
             // live one.
             'paystack_secret_key' => [$existing === null ? 'required' : 'nullable', 'string', 'regex:/^sk_(test|live)_[A-Za-z0-9]+$/'],
             'paystack_public_key' => ['nullable', 'string', 'max:255'],
-            'paystack_receipt_domain' => ['nullable', 'string', 'max:255'],
+            // Either a full address or a bare domain. Anything else reaches Paystack as a
+            // malformed email and comes back as a flat "invalid email" that names no field.
+            'paystack_billing_email' => ['required', 'string', 'max:255', 'regex:/^(?:[^@\s]+@[^@\s]+\.[^@\s]+|[^@\s]+\.[^@\s]+)$/'],
         ], [
             'paystack_secret_key.regex' => __('That does not look like a Paystack secret key — they start sk_test_ or sk_live_.'),
+            'paystack_billing_email.regex' => __('Enter an email address like billing@my-isp.co.ke, or just a domain like my-isp.co.ke.'),
         ]);
 
         $configuration = $existing ?? new PaystackConfiguration;
 
         $configuration->fill([
             'public_key' => $validated['paystack_public_key'] !== '' ? $validated['paystack_public_key'] : null,
-            'receipt_domain' => $validated['paystack_receipt_domain'] !== '' ? $validated['paystack_receipt_domain'] : null,
+            'billing_email' => $validated['paystack_billing_email'],
             'is_active' => true,
         ]);
 
@@ -418,10 +421,11 @@ new #[Title('Payments')] class extends Component {
             <flux:input wire:model="paystack_public_key" :label="__('Public key')" placeholder="pk_test_…" />
 
             <flux:input
-                wire:model="paystack_receipt_domain"
-                :label="__('Receipt email domain')"
-                placeholder="my-isp.co.ke"
-                :description="__('Paystack needs an email per payment. Walk-in customers only give a phone number, so one is made up against this domain.')"
+                wire:model="paystack_billing_email"
+                :label="__('Billing email')"
+                required
+                placeholder="billing@my-isp.co.ke"
+                :description="__('Paystack needs an email on every payment, and a walk-in customer only gives a phone number. Enter your own address to use for all of them, or just a domain to give each customer their own.')"
             />
 
             <div>

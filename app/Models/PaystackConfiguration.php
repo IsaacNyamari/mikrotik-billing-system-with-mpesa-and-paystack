@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
 use App\Support\PhoneNumber;
+use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Model;
@@ -19,10 +20,10 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $secret_key
  * @property string|null $public_key
  * @property string $currency
- * @property string|null $receipt_domain
+ * @property string|null $billing_email
  * @property bool $is_active
  */
-#[Fillable(['secret_key', 'public_key', 'currency', 'receipt_domain', 'is_active'])]
+#[Fillable(['secret_key', 'public_key', 'currency', 'billing_email', 'is_active'])]
 #[Hidden(['secret_key'])]
 class PaystackConfiguration extends Model
 {
@@ -62,13 +63,38 @@ class PaystackConfiguration extends Model
     }
 
     /**
-     * Paystack insists on an email for every charge, and a walk-in has given only a phone
-     * number. Deriving one keeps their receipts together without inventing a person.
+     * The email Paystack is given for a charge, or null when there is no usable one.
+     *
+     * Paystack insists on an email and a walk-in has given only a phone number, so one has to
+     * come from somewhere. Both answers an ISP might reasonably give are accepted:
+     *
+     * - a full address, used as it stands for every charge;
+     * - a bare domain, which derives a per-customer address so one buyer's receipts stay
+     *   together.
+     *
+     * Nothing unvalidated is ever sent. Paystack rejects a malformed address with a flat
+     * "invalid email", which tells the operator nothing about which field is at fault.
      */
-    public function emailFor(string $phone): string
+    public function emailFor(string $phone): ?string
     {
-        $domain = $this->receipt_domain ?: 'hotspot.invalid';
+        $configured = trim((string) $this->billing_email);
 
-        return PhoneNumber::normalise($phone).'@'.ltrim($domain, '@');
+        if (filter_var($configured, FILTER_VALIDATE_EMAIL) !== false) {
+            return $configured;
+        }
+
+        // A domain has a dot and no "@" — anything else was meant to be an address and is
+        // malformed, so it is not patched up into something that looks deliberate.
+        if ($configured !== '' && ! str_contains($configured, '@') && str_contains($configured, '.')) {
+            $derived = PhoneNumber::normalise($phone).'@'.$configured;
+
+            return filter_var($derived, FILTER_VALIDATE_EMAIL) !== false ? $derived : null;
+        }
+
+        // Falling back to the ISP's own address beats failing the sale outright. Read from
+        // the bound tenant rather than the relation, which the request already knows.
+        $contact = trim((string) Tenancy::tenant()?->contact_email);
+
+        return filter_var($contact, FILTER_VALIDATE_EMAIL) !== false ? $contact : null;
     }
 }
