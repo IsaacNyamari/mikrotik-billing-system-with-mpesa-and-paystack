@@ -50,6 +50,10 @@
                             {{ __('Routers') }}
                         </flux:sidebar.item>
 
+                        <flux:sidebar.item icon="chart-bar" :href="route('monitor.index')" :current="request()->routeIs('monitor.*')" wire:navigate>
+                            {{ __('MikroTik Monitor') }}
+                        </flux:sidebar.item>
+
                         @can('viewAny', App\Models\Plan::class)
                             <flux:sidebar.item icon="wifi" :href="route('plans.index')" :current="request()->routeIs('plans.*')" wire:navigate>
                                 {{ __('Plans') }}

@@ -21,7 +21,9 @@ Route::get('p/{portalKey}/mikrotik/{page}', HotspotPageController::class)
 Route::post('webhooks/mpesa/{token}', MpesaCallbackController::class)->name('webhooks.mpesa');
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::view('dashboard', 'dashboard')->name('dashboard');
+    Route::livewire('dashboard', 'pages::dashboard')->name('dashboard');
+
+    Route::livewire('mikrotik-monitor', 'pages::monitor.index')->name('monitor.index');
 
     // "create" is declared before the wildcard so it is not swallowed by {customer}.
     Route::livewire('customers', 'pages::customers.index')->name('customers.index');

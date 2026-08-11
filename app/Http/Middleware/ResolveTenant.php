@@ -31,6 +31,12 @@ class ResolveTenant
             : $user->tenant;
 
         if ($tenant === null) {
+            // Clear rather than leave alone: this user has no ISP, and inheriting whatever
+            // was resolved earlier in the process would show them another ISP's data. A
+            // fresh container makes that unlikely in production, but "unlikely" is not a
+            // guarantee worth resting tenant isolation on.
+            Tenancy::forget();
+
             // A super admin belongs to no ISP, so every tenant-scoped screen would throw for
             // them. Sending them to pick one here is far better than letting the query fail
             // deep inside a view, where it is too late to do anything graceful.
