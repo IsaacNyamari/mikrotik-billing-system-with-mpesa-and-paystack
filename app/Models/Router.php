@@ -34,6 +34,9 @@ use Illuminate\Support\Str;
  * @property string|null $wg_address
  * @property CarbonImmutable|null $wg_configured_at
  * @property array<string, mixed>|null $setup_options
+ * @property string|null $provision_token
+ * @property CarbonImmutable|null $provision_token_expires_at
+ * @property CarbonImmutable|null $provision_fetched_at
  * @property RouterStatus $status
  * @property string|null $last_error
  * @property CarbonImmutable|null $last_seen_at
@@ -103,7 +106,20 @@ class Router extends Model
             'last_seen_at' => 'datetime',
             'wg_configured_at' => 'datetime',
             'setup_options' => 'array',
+            'provision_token_expires_at' => 'datetime',
+            'provision_fetched_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Whether the one-time link the router fetches its configuration from is still good.
+     */
+    public function provisionTokenIsUsable(): bool
+    {
+        return $this->provision_token !== null
+            && $this->provision_fetched_at === null
+            && $this->provision_token_expires_at !== null
+            && $this->provision_token_expires_at->isFuture();
     }
 
     /**

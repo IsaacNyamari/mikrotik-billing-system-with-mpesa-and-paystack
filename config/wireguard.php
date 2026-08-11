@@ -75,6 +75,44 @@ return [
         // not guessed from the model: putting the wrong port in a bridge takes
         // a router off the internet.
         'lan_interface' => 'ether3',
+
+        // The port the router's own internet arrives on. Only used when the
+        // script wipes the device: a reset leaves no DHCP client behind, and a
+        // router with no way out never reaches us again.
+        'wan_interface' => 'ether1',
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Provisioning Links
+    |--------------------------------------------------------------------------
+    |
+    | A wiped router fetches its configuration from us before it has any
+    | credentials, so the link is public and guarded only by its token. It is
+    | single-use and lives just long enough for an operator to walk from the
+    | screen to the device.
+    |
+    */
+
+    'provision_link_minutes' => (int) env('WIREGUARD_PROVISION_LINK_MINUTES', 30),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Loading Peers Without a Terminal
+    |--------------------------------------------------------------------------
+    |
+    | Adding a peer to a running tunnel needs root, which the web user must not
+    | have. This is the one command it is allowed to run: a wrapper taking no
+    | arguments that only syncs peers already in the database, permitted by a
+    | single sudoers line. Nothing is passed to it, so there is nothing to
+    | inject into.
+    |
+    | Empty means an operator has to run `php artisan wireguard:peers --apply`
+    | on the server themselves, and the screen says so rather than offering a
+    | button that quietly fails.
+    |
+    */
+
+    'sync_command' => env('WIREGUARD_SYNC_COMMAND', ''),
 
 ];

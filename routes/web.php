@@ -4,6 +4,7 @@ use App\Http\Controllers\HotspotPageController;
 use App\Http\Controllers\MpesaCallbackController;
 use App\Http\Controllers\PaystackWebhookController;
 use App\Http\Controllers\PlatformMpesaCallbackController;
+use App\Http\Controllers\RouterProvisionController;
 use Illuminate\Support\Facades\Route;
 
 // The public site. Anyone reading these has internet, so unlike the captive portal these
@@ -31,6 +32,12 @@ Route::post('webhooks/mpesa/{token}', MpesaCallbackController::class)->name('web
 // Paystack signs every webhook, so this one needs no secret in its path — the signature is
 // checked against the paying ISP's own key.
 Route::post('webhooks/paystack', PaystackWebhookController::class)->name('webhooks.paystack');
+
+// A router fetching its own configuration, before it has a tunnel or any credentials to
+// authenticate with. The token in the path is the only guard, and it is single-use.
+Route::get('provision/{token}', RouterProvisionController::class)
+    ->where('token', '[A-Za-z0-9]{32,64}')
+    ->name('routers.provision-script');
 
 // An ISP paying the platform, rather than a customer paying an ISP. Its own endpoint and its
 // own token: the tenant callback looks payments up in a table this money never touches.

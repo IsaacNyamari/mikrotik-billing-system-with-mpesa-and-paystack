@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#
+# Loads every known router's WireGuard peer onto this server's tunnel.
+#
+# Runs as root through one sudoers line, because adding a peer to a live interface needs
+# privileges the web user must never hold. The privilege is drawn as narrowly as it goes:
+#
+#   * it takes no arguments, so there is nothing for a caller to inject into;
+#   * it only ever applies peers that are already in the database;
+#   * it can add and update peers, and nothing else on this machine.
+#
+# The worst a compromised web user could do with it is re-apply peers that are already there.
+#
+# Install with deploy/install-wg-sync.sh.
+
+set -euo pipefail
+
+APP_DIR="${ISP_APP_DIR:-/var/www/isp}"
+
+cd "$APP_DIR"
+
+exec /usr/bin/php artisan wireguard:peers --apply --interface=wg0

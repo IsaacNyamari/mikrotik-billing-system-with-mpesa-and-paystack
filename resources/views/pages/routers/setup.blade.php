@@ -3,6 +3,8 @@
 use App\Models\Router;
 use App\Services\Provisioning\RouterSetupScript;
 use App\Services\Provisioning\TunnelAllocator;
+use App\Services\Provisioning\WireGuardPeerSync;
+use App\Services\RouterOs\RouterHealthProbe;
 use App\Support\Audit\AuditLogger;
 use App\Support\Authorization\Permissions;
 use Flux\Flux;
@@ -25,7 +27,12 @@ new #[Title('Router setup')] class extends Component {
 
     public string $lanInterface = '';
 
+    public string $wanInterface = '';
+
     public bool $withHotspot = true;
+
+    /** Whether the script erases the router first. Never the default. */
+    public bool $wipe = false;
 
     public function mount(Router $router): void
     {
@@ -38,7 +45,9 @@ new #[Title('Router setup')] class extends Component {
         $options = $router->setupOptions();
 
         $this->lanInterface = (string) $options['lan_interface'];
+        $this->wanInterface = (string) ($options['wan_interface'] ?? 'ether1');
         $this->withHotspot = (bool) ($options['with_hotspot'] ?? true);
+        $this->wipe = (bool) ($options['wipe'] ?? false);
     }
 
     #[Computed]
@@ -58,7 +67,9 @@ new #[Title('Router setup')] class extends Component {
     {
         return app(RouterSetupScript::class)->for($this->router, [
             'lan_interface' => $this->lanInterface,
+            'wan_interface' => $this->wanInterface,
             'with_hotspot' => $this->withHotspot,
+            'wipe' => $this->wipe,
             // The password already on the router stays valid until the operator deliberately
             // rotates it, so opening this page does not silently lock out a working device.
             'api_password' => $this->router->api_password,
@@ -66,9 +77,51 @@ new #[Title('Router setup')] class extends Component {
     }
 
     #[Computed]
+    public function peerSyncIsAutomatic(): bool
+    {
+        return app(WireGuardPeerSync::class)->isAvailable();
+    }
+
+    #[Computed]
     public function tunnelReady(): bool
     {
         return config('wireguard.enabled') === true && ! blank(config('wireguard.public_key'));
+    }
+
+    /**
+     * Tell this server about the router, without anyone opening a terminal.
+     */
+    public function syncPeer(WireGuardPeerSync $sync): void
+    {
+        Gate::authorize(Permissions::ROUTERS_PROVISION);
+
+        $result = $sync->sync($this->router);
+
+        Flux::toast(
+            variant: $result['ok'] ? 'success' : 'warning',
+            text: $result['message'],
+        );
+    }
+
+    /**
+     * Try the router down the tunnel and say what happened.
+     *
+     * The same probe the router page runs. Put here because this is where an operator is
+     * standing when they want to know whether what they just pasted worked.
+     */
+    public function testConnection(RouterHealthProbe $probe): void
+    {
+        Gate::authorize('command', $this->router);
+
+        $router = $this->router;
+
+        $probe->probe($router);
+
+        unset($this->router, $this->script);
+
+        $router->status->isReachable()
+            ? Flux::toast(variant: 'success', text: __('Connected to :name. The tunnel is up.', ['name' => $router->identity ?? $router->name]))
+            : Flux::toast(variant: 'danger', text: $router->last_error ?? __('Still cannot reach it.'));
     }
 
     /**
@@ -158,6 +211,31 @@ new #[Title('Router setup')] class extends Component {
                 </flux:subheading>
             </div>
 
+            <flux:radio.group wire:model.live="wipe" :label="__('What should the script do to what is already on the router?')" variant="cards" class="flex-col">
+                <flux:radio
+                    :value="false"
+                    :label="__('Add to it')"
+                    :description="__('Leaves the existing configuration alone and adds the tunnel, the API user and the HotSpot alongside it. Safe on a router already carrying your own setup.')"
+                />
+                <flux:radio
+                    :value="true"
+                    :label="__('Wipe it and build from nothing')"
+                    :description="__('Erases everything, including the MikroTik defaults, and rebuilds the router from scratch. Right for a device straight out of the box.')"
+                />
+            </flux:radio.group>
+
+            @if ($wipe)
+                <flux:callout variant="danger" icon="exclamation-triangle">
+                    <flux:callout.heading>{{ __('This erases the router') }}</flux:callout.heading>
+                    <flux:callout.text>
+                        {{ __('There is no undo and no backup is kept. The router reboots, comes back with nothing, and rebuilds itself from a file it downloads first.') }}
+                    </flux:callout.text>
+                    <flux:callout.text>
+                        {{ __('Get the two interfaces below right. If the uplink is named wrong the router comes back with no way to reach the internet, and the only fix is to walk to it with a cable. Check them in /interface print on the device first.') }}
+                    </flux:callout.text>
+                </flux:callout>
+            @endif
+
             <div class="grid gap-4 sm:grid-cols-2">
                 <flux:input
                     wire:model.live.debounce.500ms="lanInterface"
@@ -166,12 +244,29 @@ new #[Title('Router setup')] class extends Component {
                     placeholder="ether3"
                 />
 
+                @if ($wipe)
+                    <flux:input
+                        wire:model.live.debounce.500ms="wanInterface"
+                        :label="__('Interface the internet comes in on')"
+                        :description="__('The uplink. After a wipe the router has no DHCP client until this is configured.')"
+                        placeholder="ether1"
+                    />
+                @else
+                    <flux:switch
+                        wire:model.live="withHotspot"
+                        :label="__('Set up the HotSpot too')"
+                        :description="__('Turn off for a router whose network you have already built. The tunnel and API are still configured.')"
+                    />
+                @endif
+            </div>
+
+            @if ($wipe)
                 <flux:switch
                     wire:model.live="withHotspot"
                     :label="__('Set up the HotSpot too')"
-                    :description="__('Turn off for a router whose network you have already built. The tunnel and API are still configured.')"
+                    :description="__('Turn off if you would rather build the customer network yourself afterwards.')"
                 />
-            </div>
+            @endif
         </flux:card>
 
         <flux:card class="flex flex-col gap-4">
@@ -213,13 +308,54 @@ new #[Title('Router setup')] class extends Component {
         <flux:card class="flex flex-col gap-4">
             <div>
                 <flux:heading size="lg">{{ __('After it runs') }}</flux:heading>
+                <flux:subheading>{{ __('Both of these happen here — you should not need a terminal on the server.') }}</flux:subheading>
             </div>
 
-            <ol class="ml-5 list-decimal space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
-                <li>{{ __('On the router, check the tunnel: /interface/wireguard/peers print detail — a recent last-handshake means it reached us.') }}</li>
-                <li>{{ __('Add the matching peer on the management server: php artisan wireguard:peers') }}</li>
-                <li>{{ __('Then test from here: php artisan router:test :slug', ['slug' => $this->router->slug]) }}</li>
-            </ol>
+            <div class="flex flex-col gap-3">
+                <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+                    <div class="min-w-0 flex-1">
+                        <flux:heading size="sm">{{ __('1. Tell this server about the router') }}</flux:heading>
+                        <flux:text size="sm" class="opacity-70">
+                            {{ __('WireGuard is mutual — the router knowing about us is only half of it.') }}
+                        </flux:text>
+                    </div>
+
+                    @if ($this->peerSyncIsAutomatic)
+                        <flux:button size="sm" wire:click="syncPeer" wire:loading.attr="disabled" wire:target="syncPeer">
+                            <span wire:loading.remove wire:target="syncPeer">{{ __('Add peer') }}</span>
+                            <span wire:loading wire:target="syncPeer">{{ __('Adding…') }}</span>
+                        </flux:button>
+                    @else
+                        <flux:text size="sm" class="font-mono opacity-70">php artisan wireguard:peers --apply</flux:text>
+                    @endif
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+                    <div class="min-w-0 flex-1">
+                        <flux:heading size="sm">{{ __('2. Check the platform can reach it') }}</flux:heading>
+                        <flux:text size="sm" class="opacity-70">
+                            {{ __('A wiped router takes a minute or two to reboot before this will answer.') }}
+                        </flux:text>
+                    </div>
+
+                    <flux:button size="sm" variant="primary" wire:click="testConnection" wire:loading.attr="disabled" wire:target="testConnection">
+                        <span wire:loading.remove wire:target="testConnection">{{ __('Test connection') }}</span>
+                        <span wire:loading wire:target="testConnection">{{ __('Connecting…') }}</span>
+                    </flux:button>
+                </div>
+            </div>
+
+            @unless ($this->peerSyncIsAutomatic)
+                <flux:callout variant="warning" icon="command-line">
+                    <flux:callout.text>
+                        {{ __('Adding a peer changes a live tunnel, which needs root — the web user deliberately does not have it. Run deploy/install-wg-sync.sh once on the server to allow this one command, and the button appears.') }}
+                    </flux:callout.text>
+                </flux:callout>
+            @endunless
+
+            <flux:text size="sm" class="opacity-70">
+                {{ __('On the router itself, /interface/wireguard/peers print detail shows a recent last-handshake once it has reached us.') }}
+            </flux:text>
 
             <flux:separator />
 

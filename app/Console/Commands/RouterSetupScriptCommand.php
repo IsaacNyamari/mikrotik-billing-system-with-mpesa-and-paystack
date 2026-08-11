@@ -20,6 +20,8 @@ class RouterSetupScriptCommand extends Command
         {router : Router slug.}
         {--tenant= : ISP slug. Required when more than one exists.}
         {--lan= : The interface customers connect to, e.g. ether3 or wlan1.}
+        {--wan= : The interface the internet arrives on. Only used with --wipe.}
+        {--wipe : Erase the router and rebuild it from nothing. There is no undo.}
         {--no-hotspot : Set up the tunnel and API only, leaving the network alone.}';
 
     protected $description = 'Print the paste-once setup script for a router';
@@ -41,10 +43,15 @@ class RouterSetupScriptCommand extends Command
                 return self::FAILURE;
             }
 
-            $options = ['with_hotspot' => ! $this->option('no-hotspot')];
+            $options = [
+                'with_hotspot' => ! $this->option('no-hotspot'),
+                'wipe' => (bool) $this->option('wipe'),
+            ];
 
-            if (is_string($this->option('lan')) && $this->option('lan') !== '') {
-                $options['lan_interface'] = (string) $this->option('lan');
+            foreach (['lan' => 'lan_interface', 'wan' => 'wan_interface'] as $option => $key) {
+                if (is_string($this->option($option)) && $this->option($option) !== '') {
+                    $options[$key] = (string) $this->option($option);
+                }
             }
 
             // Straight to stdout with no decoration: this gets piped, redirected and pasted.
