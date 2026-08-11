@@ -55,6 +55,12 @@
                                 {{ __('Plans') }}
                             </flux:sidebar.item>
                         @endcan
+
+                        @can(App\Support\Authorization\Permissions::HOTSPOT_UPDATE_PORTAL)
+                            <flux:sidebar.item icon="paint-brush" :href="route('settings.portal')" :current="request()->routeIs('settings.portal')" wire:navigate>
+                                {{ __('Portal') }}
+                            </flux:sidebar.item>
+                        @endcan
                     </flux:sidebar.group>
                 @endcan
 

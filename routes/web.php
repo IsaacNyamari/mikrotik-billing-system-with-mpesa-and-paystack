@@ -44,6 +44,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::livewire('reports/earnings', 'pages::reports.earnings')->name('reports.earnings');
     Route::livewire('settings/mpesa', 'pages::settings.mpesa')->name('settings.mpesa');
+    Route::livewire('settings/portal', 'pages::settings.portal')->name('settings.portal');
 });
 
 require __DIR__.'/settings.php';

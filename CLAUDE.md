@@ -243,6 +243,26 @@ and never sees another's.
 development and first-run convenience only — never the source of truth. Nothing outside that
 command reads M-PESA credentials from config.
 
+### Portal appearance is per ISP
+
+`portal_settings` (one row per tenant) holds branding, copy, colours and custom CSS, edited at
+**Settings → Portal**. Every column is nullable and `PortalSetting::current()` returns an unsaved
+instance when there is no row, so a portal renders for an ISP that has customised nothing.
+
+The portal layout carries **no `@vite` and no Flux**. It is the one page that must render for
+someone who has paid nothing and can reach almost nothing, and a compiled stylesheet ties it to
+the asset build — a stale `public/hot` points every asset URL at a Vite dev server on localhost,
+which a phone can never reach. The CSS is inlined; the only external request left is Livewire's.
+
+Two values reach a stylesheet, so both are guarded rather than escaped:
+
+- `primary_color` is validated as `#rrggbb` on the way in **and** again in `primary()`, with the
+  column narrow enough that a longer injection cannot be stored at all.
+- `custom_css` has angle brackets stripped, so it cannot close the element and open a script.
+
+Button text colour is chosen from the brand colour's luminance, so an ISP picking pale yellow
+does not end up with white text nobody can read.
+
 ### Scheduled work (`routes/console.php`)
 
 - `hotspot:sweep --retry` every minute — removes spent packages, and re-pushes ones that were paid

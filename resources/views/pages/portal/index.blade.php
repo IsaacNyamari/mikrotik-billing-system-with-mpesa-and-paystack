@@ -99,6 +99,16 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     }
 
     /**
+     * This ISP's branding. Always returns a usable object, so a portal renders even for an
+     * ISP that has customised nothing.
+     */
+    #[Computed]
+    public function branding(): \App\Models\PortalSetting
+    {
+        return \App\Models\PortalSetting::current();
+    }
+
+    /**
      * @return Collection<int, Plan>
      */
     #[Computed]
@@ -208,139 +218,128 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     }
 }; ?>
 
-<div class="mx-auto flex min-h-screen w-full max-w-lg flex-col gap-6 p-4 sm:p-6">
-    <header class="pt-4 text-center">
-        <h1 class="text-2xl font-semibold text-zinc-900 dark:text-white">{{ $this->tenant->name }}</h1>
-        <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{{ __('Choose a package to get online') }}</p>
+<div class="portal">
+    <header class="portal__head">
+        @if ($this->branding->logoUrl())
+            <img src="{{ $this->branding->logoUrl() }}" alt="{{ $this->branding->displayName($this->tenant) }}" class="portal__logo">
+        @endif
+
+        <h1 class="portal__title">{{ $this->branding->displayName($this->tenant) }}</h1>
+        <p class="portal__sub">{{ $this->branding->displayHeadline() }}</p>
+
+        @if ($this->branding->intro_text)
+            <p class="portal__sub">{{ $this->branding->intro_text }}</p>
+        @endif
     </header>
 
     @if ($this->payment?->status === App\Enums\PaymentStatus::Paid && $this->payment->hotspotUser)
         @php($access = $this->payment->hotspotUser)
 
-        <div class="rounded-xl border border-green-200 bg-green-50 p-6 text-center dark:border-green-900 dark:bg-green-950">
-            <flux:icon.check-circle class="mx-auto size-12 text-green-600 dark:text-green-400" />
-            <h2 class="mt-3 text-lg font-semibold text-green-900 dark:text-green-100">{{ __('Payment received') }}</h2>
-            <p class="mt-1 text-sm text-green-800 dark:text-green-200">
-                {{ __('Your code is your username and password. Keep it to log back in.') }}
-            </p>
+        <div class="note note--good">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <h2 class="note__title">{{ __('Payment received') }}</h2>
+            <p class="note__text">{{ $this->branding->displaySuccessText() }}</p>
 
-            <p class="mt-4 font-mono text-2xl font-bold tracking-widest text-green-900 dark:text-green-100">
-                {{ $access->username }}
-            </p>
+            <p class="code">{{ $access->username }}</p>
 
             @if ($access->expires_at)
-                <p class="mt-2 text-xs text-green-700 dark:text-green-300">
-                    {{ __('Valid for :time', ['time' => $access->remainingForHumans()]) }}
-                </p>
+                <p class="note__text">{{ __('Valid for :time', ['time' => $access->remainingForHumans()]) }}</p>
             @endif
         </div>
 
         @if ($loginUrl !== '')
-            {{-- Posted straight to the MikroTik, which is what actually lets them online.
-                 The HotSpot profile accepts http-pap, so the credentials go as plain fields. --}}
+            {{-- Posted straight to the MikroTik, which is what actually lets them online. The
+                 HotSpot profile accepts http-pap, so the credentials go as plain fields. --}}
             <form method="post" action="{{ $loginUrl }}" id="hotspot-login">
                 <input type="hidden" name="username" value="{{ $access->username }}">
                 <input type="hidden" name="password" value="{{ $access->password }}">
-                <flux:button type="submit" variant="primary" class="w-full">
-                    {{ __('Connect now') }}
-                </flux:button>
+                <button type="submit" class="btn">{{ __('Connect now') }}</button>
             </form>
 
             <script>
-                // Log them in without making them press anything.
-                setTimeout(() => document.getElementById('hotspot-login')?.submit(), 1200);
+                // Log them in without making them press anything. The button stays as the
+                // fallback for a browser that blocks this.
+                setTimeout(function () {
+                    var form = document.getElementById('hotspot-login');
+                    if (form) { form.submit(); }
+                }, 1200);
             </script>
         @else
-            <div class="rounded-lg bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                {{ __('Now return to the wifi login page and sign in with the code above.') }}
+            <div class="note note--warn">
+                <p class="note__text">{{ __('Now return to the wifi login page and sign in with the code above.') }}</p>
             </div>
         @endif
     @elseif ($this->isWaiting)
-        <div
-            class="rounded-xl border border-zinc-200 bg-white p-6 text-center dark:border-zinc-700 dark:bg-zinc-900"
-            wire:poll.3s="checkPayment"
-        >
-            <flux:icon.device-phone-mobile class="mx-auto size-12 animate-pulse text-zinc-400" />
-            <h2 class="mt-3 text-lg font-semibold text-zinc-900 dark:text-white">{{ __('Check your phone') }}</h2>
-            <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+        <div class="note note--plain" wire:poll.3s="checkPayment">
+            <svg class="icon pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+                <rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2" stroke-linecap="round"/>
+            </svg>
+            <h2 class="note__title">{{ __('Check your phone') }}</h2>
+            <p class="note__text">
                 {{ __('Enter your M-PESA PIN to pay :amount.', ['amount' => number_format((float) $this->payment->amount, 2)]) }}
             </p>
-            <p class="mt-4 text-xs text-zinc-500">{{ __('This page updates by itself.') }}</p>
+            <p class="note__text">{{ __('This page updates by itself.') }}</p>
         </div>
     @elseif ($this->payment && $this->payment->status->isSettled())
-        <div class="rounded-xl border border-red-200 bg-red-50 p-6 text-center dark:border-red-900 dark:bg-red-950">
-            <flux:icon.x-circle class="mx-auto size-12 text-red-600 dark:text-red-400" />
-            <h2 class="mt-3 text-lg font-semibold text-red-900 dark:text-red-100">
-                {{ $this->payment->status->label() }}
-            </h2>
-            <p class="mt-1 text-sm text-red-800 dark:text-red-200">
-                {{ $this->payment->result_description ?? __('The payment did not go through.') }}
-            </p>
-            <flux:button class="mt-4 w-full" wire:click="startOver">{{ __('Try again') }}</flux:button>
+        <div class="note note--bad">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6" stroke-linecap="round"/>
+            </svg>
+            <h2 class="note__title">{{ $this->payment->status->label() }}</h2>
+            <p class="note__text">{{ $this->payment->result_description ?? __('The payment did not go through.') }}</p>
+            <button type="button" class="btn btn--quiet" style="margin-top:1rem" wire:click="startOver">
+                {{ __('Try again') }}
+            </button>
         </div>
     @else
         @unless ($this->canTakePayment)
-            <div class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center dark:border-amber-900 dark:bg-amber-950">
-                <p class="font-medium text-amber-900 dark:text-amber-100">{{ __('Payments are not set up yet') }}</p>
-                <p class="mt-1 text-sm text-amber-800 dark:text-amber-200">
-                    {{ __('Please ask at the counter for access.') }}
-                </p>
+            <div class="note note--warn">
+                <h2 class="note__title">{{ __('Payments are not set up yet') }}</h2>
+                <p class="note__text">{{ __('Please ask at the counter for access.') }}</p>
             </div>
         @endunless
 
-        <form wire:submit="pay" class="flex flex-col gap-3">
-            @forelse ($this->plans as $plan)
-                @php($selected = $selectedPlanId === $plan->id)
+        <form wire:submit="pay">
+            <fieldset class="plans">
+                <legend class="sr-only">{{ __('Packages') }}</legend>
 
-                <label
-                    wire:key="plan-{{ $plan->id }}"
-                    @class([
-                        'relative flex cursor-pointer items-center gap-4 rounded-xl border bg-white p-4 shadow-sm transition dark:bg-zinc-900',
-                        'border-blue-600 ring-2 ring-blue-600/20 dark:border-blue-400' => $selected,
-                        'border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600' => ! $selected,
-                    ])
-                >
-                    <input
-                        type="radio"
-                        wire:model.live="selectedPlanId"
-                        value="{{ $plan->id }}"
-                        class="size-5 shrink-0 border-zinc-300 text-blue-600 focus:ring-blue-600 dark:border-zinc-600"
-                    >
+                @forelse ($this->plans as $plan)
+                    <label wire:key="plan-{{ $plan->id }}" @class(['plan', 'plan--on' => $selectedPlanId === $plan->id])>
+                        <input type="radio" wire:model.live="selectedPlanId" value="{{ $plan->id }}">
 
-                    <div class="min-w-0 flex-1">
-                        <p class="font-semibold text-zinc-900 dark:text-white">{{ $plan->name }}</p>
-                        <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
-                            {{ $plan->validityForHumans() }} &middot; {{ $plan->speedForHumans() }}
-                        </p>
-                        @if ($plan->data_cap_mb)
-                            <p class="text-sm text-zinc-500 dark:text-zinc-400">
-                                {{ number_format($plan->data_cap_mb) }} MB {{ __('included') }}
-                            </p>
-                        @endif
-                    </div>
-
-                    <div class="shrink-0 text-right">
-                        <span class="text-xl font-bold tabular-nums text-zinc-900 dark:text-white">
-                            {{ number_format((float) $plan->price, 0) }}
+                        <span class="plan__body">
+                            <span class="plan__name">{{ $plan->name }}</span>
+                            <span class="plan__meta" style="display:block">
+                                {{ $plan->validityForHumans() }}@if ($this->branding->show_speed) &middot; {{ $plan->speedForHumans() }}@endif
+                            </span>
+                            @if ($plan->data_cap_mb && $this->branding->show_data_cap)
+                                <span class="plan__meta" style="display:block">
+                                    {{ number_format($plan->data_cap_mb) }} MB {{ __('included') }}
+                                </span>
+                            @endif
                         </span>
-                        <span class="block text-xs text-zinc-400">{{ $this->tenant->currency }}</span>
+
+                        <span class="plan__price">
+                            <span class="plan__amount">{{ number_format((float) $plan->price, 0) }}</span>
+                            <span class="plan__currency">{{ $this->tenant->currency }}</span>
+                        </span>
+                    </label>
+                @empty
+                    <div class="note note--plain">
+                        <p class="note__text">{{ __('No packages are on sale right now.') }}</p>
                     </div>
-                </label>
-            @empty
-                <div class="rounded-xl border border-zinc-200 bg-white p-8 text-center dark:border-zinc-700 dark:bg-zinc-900">
-                    <p class="text-zinc-600 dark:text-zinc-400">{{ __('No packages are on sale right now.') }}</p>
-                </div>
-            @endforelse
+                @endforelse
+            </fieldset>
 
             @error('selectedPlanId')
-                <p class="text-sm font-medium text-red-600 dark:text-red-400">{{ $message }}</p>
+                <p class="field__error" style="margin-top:.75rem">{{ $message }}</p>
             @enderror
 
             @if ($this->plans->isNotEmpty() && $this->canTakePayment)
-                <div class="mt-2">
-                    <label for="portal-phone" class="mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                        {{ __('M-PESA number') }}
-                    </label>
+                <div class="field" style="margin-top:1.25rem">
+                    <label class="field__label" for="portal-phone">{{ __('M-PESA number') }}</label>
                     <input
                         id="portal-phone"
                         wire:model="phone"
@@ -349,32 +348,23 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                         autocomplete="tel"
                         placeholder="07XX XXX XXX"
                         required
-                        @class([
-                            'block w-full rounded-lg border bg-white px-3 py-2.5 text-base text-zinc-900 shadow-sm outline-none transition placeholder:text-zinc-400 focus:ring-2 dark:bg-zinc-900 dark:text-white',
-                            'border-red-500 focus:border-red-500 focus:ring-red-500/20' => $errors->has('phone'),
-                            'border-zinc-300 focus:border-blue-600 focus:ring-blue-600/20 dark:border-zinc-600' => ! $errors->has('phone'),
-                        ])
+                        @class(['field__input', 'field__input--bad' => $errors->has('phone')])
                     >
                     @error('phone')
-                        <p class="mt-1.5 text-sm font-medium text-red-600 dark:text-red-400">{{ $message }}</p>
+                        <p class="field__error">{{ $message }}</p>
                     @enderror
                 </div>
 
                 @error('payment')
-                    <div class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950">
-                        <p class="text-sm font-medium text-red-800 dark:text-red-200">{{ $message }}</p>
+                    <div class="note note--bad" style="margin-top:1rem;text-align:left">
+                        <p class="note__text">{{ $message }}</p>
                     </div>
                 @enderror
 
-                <button
-                    type="submit"
-                    wire:loading.attr="disabled"
-                    wire:target="pay"
-                    class="mt-1 flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-600/40 disabled:opacity-60"
-                >
-                    <svg wire:loading wire:target="pay" class="size-5 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                <button type="submit" class="btn" style="margin-top:1rem" wire:loading.attr="disabled" wire:target="pay">
+                    <svg wire:loading wire:target="pay" class="spinner" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" opacity=".25"/>
+                        <path fill="currentColor" opacity=".75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
                     </svg>
                     <span wire:loading.remove wire:target="pay">{{ __('Pay with M-PESA') }}</span>
                     <span wire:loading wire:target="pay">{{ __('Sending request…') }}</span>
@@ -383,9 +373,21 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         </form>
     @endif
 
-    <footer class="mt-auto pb-4 text-center text-xs text-zinc-400">
-        @if ($this->tenant->contact_phone)
-            {{ __('Support: :phone', ['phone' => $this->tenant->contact_phone]) }}
+    <footer class="portal__foot">
+        @if ($this->branding->footer_text)
+            <p style="margin:0 0 .25rem">{{ $this->branding->footer_text }}</p>
+        @endif
+
+        @if ($this->branding->displaySupportPhone($this->tenant))
+            <p style="margin:0">
+                {{ __('Support: :phone', ['phone' => $this->branding->displaySupportPhone($this->tenant)]) }}
+            </p>
+        @endif
+
+        @if ($this->branding->terms_url)
+            <p style="margin:.25rem 0 0">
+                <a href="{{ $this->branding->terms_url }}" rel="noopener noreferrer" target="_blank">{{ __('Terms of service') }}</a>
+            </p>
         @endif
     </footer>
 </div>
