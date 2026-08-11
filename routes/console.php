@@ -24,6 +24,14 @@ Schedule::command('payments:reconcile')
     ->withoutOverlapping()
     ->runInBackground();
 
+// Bills each ISP for the month just ended and ages the bills that went unpaid. Daily rather
+// than monthly: raising an invoice that already exists does nothing, whereas a scheduler that
+// missed the first of the month would skip a month's income outright.
+Schedule::command('billing:run')
+    ->dailyAt('01:30')
+    ->withoutOverlapping()
+    ->runInBackground();
+
 // Keeps the dashboard's view of each device honest, and records outages.
 Schedule::command('router:test')
     ->everyFiveMinutes()

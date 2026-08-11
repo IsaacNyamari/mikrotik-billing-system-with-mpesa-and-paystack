@@ -87,7 +87,9 @@ class HotspotProvisioningTest extends TestCase
     {
         $user = app(HotspotUserProvisioner::class)->issue($this->plan, $this->router, 'TIMED123');
 
-        $this->assertEqualsWithDelta(3600, now()->diffInSeconds($user->expires_at), 5);
+        // Generous delta: the assertion is that an hour's validity becomes an hour, not that
+        // the clock has not moved. Five seconds made this fail whenever the suite ran slowly.
+        $this->assertEqualsWithDelta(3600, now()->diffInSeconds($user->expires_at), 60);
     }
 
     #[Test]

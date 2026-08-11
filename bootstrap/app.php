@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureSubscriptionIsActive;
 use App\Http\Middleware\ResolveTenant;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -28,11 +29,20 @@ return Application::configure(basePath: dirname(__DIR__))
             prepend: ResolveTenant::class,
         );
 
+        // An ISP that has not paid for the platform cannot use it. Registered as an alias
+        // rather than appended to the web group, because it applies to the console only —
+        // the captive portal and the callbacks are public and must keep working whatever the
+        // ISP owes the platform.
+        $middleware->alias([
+            'subscribed' => EnsureSubscriptionIsActive::class,
+        ]);
+
         // Safaricom posts callbacks from its own servers and has no session or CSRF token.
         // The unguessable token in the URL is what authenticates the request instead.
         $middleware->validateCsrfTokens(except: [
             'webhooks/mpesa/*',
             'webhooks/paystack',
+            'webhooks/platform/mpesa/*',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

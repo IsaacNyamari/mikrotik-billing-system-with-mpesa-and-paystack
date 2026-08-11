@@ -3,9 +3,16 @@
 use App\Http\Controllers\HotspotPageController;
 use App\Http\Controllers\MpesaCallbackController;
 use App\Http\Controllers\PaystackWebhookController;
+use App\Http\Controllers\PlatformMpesaCallbackController;
 use Illuminate\Support\Facades\Route;
 
-Route::view('/', 'welcome')->name('home');
+// The public site. Anyone reading these has internet, so unlike the captive portal these
+// pages are free to use the compiled stylesheet.
+Route::livewire('/', 'pages::frontend.home')->name('home');
+Route::livewire('about', 'pages::frontend.about')->name('about');
+Route::livewire('services', 'pages::frontend.services')->name('services');
+Route::livewire('contact', 'pages::frontend.contact')->name('contact');
+Route::livewire('pricing', 'pages::frontend.services')->name('pricing');
 
 // Public, unauthenticated: a customer sitting on a HotSpot before they have paid for anything.
 // The portal key identifies which router — and so which ISP — they landed from.
@@ -25,7 +32,18 @@ Route::post('webhooks/mpesa/{token}', MpesaCallbackController::class)->name('web
 // checked against the paying ISP's own key.
 Route::post('webhooks/paystack', PaystackWebhookController::class)->name('webhooks.paystack');
 
+// An ISP paying the platform, rather than a customer paying an ISP. Its own endpoint and its
+// own token: the tenant callback looks payments up in a table this money never touches.
+Route::post('webhooks/platform/mpesa/{token}', PlatformMpesaCallbackController::class)
+    ->name('webhooks.platform-mpesa');
+
+// Reachable however much an ISP owes — locking someone out of the page where they pay turns
+// every late payment into a phone call.
 Route::middleware(['auth', 'verified'])->group(function () {
+    Route::livewire('billing', 'pages::billing.index')->name('billing.index');
+});
+
+Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
     Route::livewire('dashboard', 'pages::dashboard')->name('dashboard');
 
     Route::livewire('mikrotik-monitor', 'pages::monitor.index')->name('monitor.index');
@@ -48,6 +66,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Platform super admins belong to no ISP, so they pick one here before any tenant-scoped
     // screen has anything to show.
     Route::livewire('select-isp', 'pages::tenants.select')->name('tenants.select');
+
+    // Runs the platform's own billing. Guarded inside the component too — a route name is not
+    // an authorization check.
+    Route::livewire('platform/subscriptions', 'pages::platform.subscriptions')->name('platform.subscriptions');
 
     Route::livewire('reports/earnings', 'pages::reports.earnings')->name('reports.earnings');
     Route::livewire('settings/mpesa', 'pages::settings.mpesa')->name('settings.mpesa');

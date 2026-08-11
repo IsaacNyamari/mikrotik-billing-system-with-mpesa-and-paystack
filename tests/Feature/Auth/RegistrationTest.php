@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Auth;
 
+use Database\Seeders\PermissionSeeder;
+use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Fortify\Features;
 use Tests\TestCase;
@@ -15,6 +17,10 @@ class RegistrationTest extends TestCase
         parent::setUp();
 
         $this->skipUnlessFortifyHas(Features::registration());
+
+        // Registering opens an ISP and makes the registrant its owner, so the role catalogue
+        // has to exist. In production it is seeded as part of deployment.
+        $this->seed([PermissionSeeder::class, RoleSeeder::class]);
     }
 
     public function test_registration_screen_can_be_rendered(): void

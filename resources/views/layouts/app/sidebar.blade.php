@@ -83,6 +83,25 @@
                         @endcan
                     </flux:sidebar.group>
                 @endcanany
+
+                {{-- What this ISP pays the platform. Shown to anyone signed in to an ISP: it
+                     is the page they are sent to when an invoice lapses, so it must be one
+                     they can also find on purpose rather than only by being redirected. --}}
+                @if (App\Support\Tenancy\Facades\Tenancy::has())
+                    <flux:sidebar.group :heading="__('Account')" class="grid">
+                        <flux:sidebar.item icon="receipt-percent" :href="route('billing.index')" :current="request()->routeIs('billing.*')" wire:navigate>
+                            {{ __('Subscription') }}
+                        </flux:sidebar.item>
+                    </flux:sidebar.group>
+                @endif
+
+                @if (auth()->user()?->isSuperAdmin())
+                    <flux:sidebar.group :heading="__('Platform admin')" class="grid">
+                        <flux:sidebar.item icon="building-office-2" :href="route('platform.subscriptions')" :current="request()->routeIs('platform.*')" wire:navigate>
+                            {{ __('ISP subscriptions') }}
+                        </flux:sidebar.item>
+                    </flux:sidebar.group>
+                @endif
             </flux:sidebar.nav>
 
             <flux:spacer />

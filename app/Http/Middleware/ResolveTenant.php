@@ -73,6 +73,13 @@ class ResolveTenant
             return false;
         }
 
+        // The platform screens are the ones that deliberately span every ISP. Sending a super
+        // admin to pick one first would make the platform's own billing reachable only by
+        // impersonating a tenant, which is the opposite of what those screens are for.
+        if ($request->routeIs('platform.*')) {
+            return false;
+        }
+
         // Nothing to choose from on a fresh install.
         return Tenant::query()->exists();
     }

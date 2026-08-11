@@ -166,7 +166,7 @@ class PaymentReconciliationTest extends TestCase
             // this ISP's own configuration.
             ->assertDontSee('billing email')
             ->assertDontSee('Settings')
-            ->assertSee('ask at the counter');
+            ->assertSee('try again in a moment');
     }
 
     /**

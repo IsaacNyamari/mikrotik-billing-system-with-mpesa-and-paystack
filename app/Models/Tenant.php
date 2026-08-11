@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -88,6 +89,35 @@ class Tenant extends Model
     public function roles(): HasMany
     {
         return $this->hasMany(Role::class);
+    }
+
+    /**
+     * What this ISP pays the platform.
+     *
+     * @return HasOne<TenantSubscription, $this>
+     */
+    public function subscription(): HasOne
+    {
+        return $this->hasOne(TenantSubscription::class);
+    }
+
+    /**
+     * @return HasMany<TenantInvoice, $this>
+     */
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(TenantInvoice::class);
+    }
+
+    /**
+     * The subscription, created on the standard terms if this ISP has none.
+     *
+     * An ISP without one would be an ISP nobody is billing, so it is reached through here
+     * rather than through the relation.
+     */
+    public function billing(): TenantSubscription
+    {
+        return TenantSubscription::forTenant($this);
     }
 
     public function isOperational(): bool

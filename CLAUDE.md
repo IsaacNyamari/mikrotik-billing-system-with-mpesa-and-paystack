@@ -383,6 +383,65 @@ server `billing-hotspot` on `bridge-hotspot`, pool `10.10.10.10-254`, DHCP, serv
 `10.10.10.1` with `login-by=http-chap,http-pap`. **PPPoE has no server**, so PPP secrets will not
 authenticate anything until one is bound to an interface.
 
+## The platform's own business
+
+The ISPs are the customers. What they pay for the platform is modelled separately from what
+their subscribers pay them — `tenant_subscriptions`, `tenant_invoices` and `tenant_payments`,
+none of them tenant-scoped models. Two reasons, both load-bearing: an ISP locked out for
+non-payment must still reach its own bill, and every earnings figure shown to an ISP is built
+from `payments`, so the platform's fees have no business appearing in their revenue.
+
+- **KSh 2,000 once**, then **3–5% of HotSpot collections** and **KSh 15 per active PPPoE line a
+  month**. The rate is per ISP, held between the published bounds, and **copied onto the
+  subscription at sign-up** — changing the price list never re-prices an ISP who already agreed
+  to something else.
+- Commission is charged on **settled payments only**. A cancelled prompt is not money.
+- PPPoE is counted at billing time on lines that are **active**; suspended and terminated ones
+  are not carrying anybody.
+- A month with no sales and no lines raises **no invoice**. A bill for zero can fall overdue and
+  cost an ISP the console for owing nothing.
+- Every invoice stores its `breakdown`. An ISP querying a bill is owed the arithmetic.
+
+### Registering makes you an ISP
+
+There is no application to approve. `CreateNewUser` opens a tenant, makes the registrant its
+`ISP_OWNER` and raises the subscription, all in one transaction — half of that is worse than
+none, since a user with no ISP cannot work and an ISP with no owner cannot be reached. What
+gates them is money, not permission, and that is a decision they can act on at any hour without
+us. Registration therefore depends on the **seeded role catalogue**; without it `assignRole`
+fails and the POST 404s.
+
+### The gate
+
+`EnsureSubscriptionIsActive` (alias `subscribed`) holds an ISP out of the console until the
+setup fee is paid, and again once an invoice passes its due date **plus** the grace period.
+Three things it deliberately never touches:
+
+- **The billing screen.** An ISP shut out of the page where they pay can only get back in by
+  telephoning somebody, which turns every late payment into support work.
+- **Super admins.** They are the people who put a lapsed account back in order.
+- **The captive portal and the callbacks.** They sit outside `auth` entirely — a customer who
+  bought an hour of wifi is not a party to the argument between their ISP and the platform, and
+  an ISP that keeps collecting is an ISP that can pay.
+
+`billing:run` raises invoices nightly rather than monthly: a scheduler that missed the first of
+the month would skip a month's income, and raising one that already exists does nothing.
+
+The platform's own M-PESA credentials live in `config/platform.php` from the environment, not
+in `mpesa_configurations` — there is one set for the whole installation, and it collects *from*
+ISPs rather than for them. It is handed to the proven Daraja gateway as an unsaved
+`MpesaConfiguration`, and it has its own callback route and token because the tenant callback
+looks payments up in a table this money never touches.
+
+## The public site
+
+`resources/views/pages/frontend/` on the `components.layouts.frontend` layout, built from
+`components/frontend/*` so a band of the site is described rather than hand-assembled. Unlike
+the captive portal it uses `@vite` — everyone reading it already has internet.
+
+Prices on the site are read from `config/platform.php`, never typed into the page, so what a
+prospect is quoted and what the system bills cannot drift apart.
+
 ## Build phases
 
 Reordered on 2026-08-11 at the user's direction: routers and the HotSpot/PPPoE layer come before
