@@ -11,13 +11,25 @@ return [
     | a customer waits on a captive portal, so an unreachable router has to fail
     | quickly rather than hold the request open.
     |
+    | The connect timeout is short because a router that is genuinely down is
+    | down now, not in five seconds. What it must not do is give up on a router
+    | that is merely slow to answer the first packet — a WireGuard tunnel whose
+    | session keys have expired re-handshakes before the TCP SYN gets through,
+    | and that first packet is sometimes simply lost. So the timeout is short
+    | and there is a second attempt behind it: a live router answers the retry
+    | in milliseconds, and a dead one has still given up inside eight seconds.
+    |
     */
 
-    'connect_timeout' => env('ROUTEROS_CONNECT_TIMEOUT', 5),
+    'connect_timeout' => env('ROUTEROS_CONNECT_TIMEOUT', 3),
 
-    'read_timeout' => env('ROUTEROS_READ_TIMEOUT', 10),
+    'read_timeout' => env('ROUTEROS_READ_TIMEOUT', 8),
 
-    'attempts' => env('ROUTEROS_ATTEMPTS', 1),
+    'attempts' => env('ROUTEROS_ATTEMPTS', 2),
+
+    // Seconds between attempts. One is enough for a tunnel to finish a
+    // handshake that was in flight when the first attempt went out.
+    'retry_delay' => env('ROUTEROS_RETRY_DELAY', 1),
 
     /*
     |--------------------------------------------------------------------------

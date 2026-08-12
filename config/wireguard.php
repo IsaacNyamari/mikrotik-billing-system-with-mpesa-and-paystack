@@ -49,7 +49,28 @@ return [
     // How often the router pokes the tunnel. NAT mappings commonly expire in
     // 30 seconds, so anything much longer means the platform can reach a
     // router only while it happens to be talking.
-    'keepalive_seconds' => (int) env('WIREGUARD_KEEPALIVE', 25),
+    //
+    // 15 rather than the usual 25 for one reason: what a customer feels as a
+    // slow portal is almost never bandwidth, it is the first packet of a
+    // conversation waiting on a tunnel that has to be rebuilt. WireGuard also
+    // rekeys after two minutes of silence, and a keepalive well inside both
+    // that and the NAT window means the tunnel is already up whenever somebody
+    // pays. It costs about 32 bytes every 15 seconds — around 6 MB a month per
+    // router, which is nothing against a customer waiting.
+    'keepalive_seconds' => (int) env('WIREGUARD_KEEPALIVE', 15),
+
+    // The tunnel's MTU.
+    //
+    // Deliberately below RouterOS's 1420 default. Routers sit on connections
+    // this platform has never seen: PPPoE broadband takes 8 bytes, a 4G dongle
+    // can take more, and a path that silently drops the "too big" message
+    // leaves TCP retransmitting a packet that can never arrive — which shows up
+    // as provisioning that hangs rather than provisioning that fails, and is
+    // by far the worst way for this to go wrong.
+    //
+    // The tunnel carries API commands measured in tens of bytes, so a
+    // conservative figure costs nothing and removes the failure mode outright.
+    'mtu' => (int) env('WIREGUARD_MTU', 1380),
 
     /*
     |--------------------------------------------------------------------------

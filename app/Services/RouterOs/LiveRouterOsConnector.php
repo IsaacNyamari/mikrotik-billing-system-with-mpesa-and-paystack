@@ -28,11 +28,13 @@ class LiveRouterOsConnector implements RouterOsConnector
                 'legacy' => false,
 
                 // An unreachable router must fail fast: an operator is watching a screen, and
-                // provisioning runs inline with their click.
+                // provisioning runs inline with their click. The retry behind it is for the
+                // opposite case — a router that is up but whose tunnel was mid-handshake when
+                // the first packet went out, which a single attempt reports as an outage.
                 'timeout' => (int) config('routeros.connect_timeout'),
                 'socket_timeout' => (int) config('routeros.read_timeout'),
                 'attempts' => (int) config('routeros.attempts'),
-                'delay' => 1,
+                'delay' => (int) config('routeros.retry_delay'),
             ]));
         } catch (BadCredentialsException) {
             throw RouterOsConnectionException::badCredentials($router->host);

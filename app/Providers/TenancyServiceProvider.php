@@ -7,6 +7,7 @@ use App\Services\Mpesa\Contracts\MpesaGateway;
 use App\Services\Mpesa\DarajaGateway;
 use App\Services\RouterOs\Contracts\RouterOsConnector;
 use App\Services\RouterOs\LiveRouterOsConnector;
+use App\Services\RouterOs\PooledRouterOsConnector;
 use App\Support\Authorization\Permissions;
 use App\Support\Tenancy\TenantContext;
 use Illuminate\Contracts\Auth\Access\Authorizable;
@@ -22,7 +23,16 @@ class TenancyServiceProvider extends ServiceProvider
 
         // Nothing in the application constructs a RouterOS socket itself; tests swap this
         // binding for an in-memory device.
-        $this->app->bind(RouterOsConnector::class, LiveRouterOsConnector::class);
+        //
+        // Scoped rather than bound, because the pool is the point: one connection per router
+        // for the life of a request or job, so issuing a HotSpot login pays for one TCP
+        // handshake and one RouterOS login down the tunnel instead of two. Scoped also means
+        // the pool is thrown away between jobs under Octane, which is what keeps a socket from
+        // outliving the router it was opened to.
+        $this->app->scoped(
+            RouterOsConnector::class,
+            fn ($app): RouterOsConnector => new PooledRouterOsConnector($app->make(LiveRouterOsConnector::class)),
+        );
 
         // Same idea for Safaricom: tests swap this rather than reaching Daraja.
         $this->app->bind(MpesaGateway::class, DarajaGateway::class);

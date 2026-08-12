@@ -521,7 +521,9 @@ class RouterSetupScript
         $port = (int) config('wireguard.listen_port');
         $serverKey = (string) config('wireguard.public_key');
         $keepalive = (int) config('wireguard.keepalive_seconds');
+        $mtu = (int) config('wireguard.mtu');
         $address = (string) $router->wg_address;
+        $server = (string) config('wireguard.server_address');
         $mask = $this->maskBits($subnet);
 
         return <<<SCRIPT
@@ -532,10 +534,23 @@ class RouterSetupScript
         # The router dials out to us, so it needs no public address and no port
         # forwarded. It works behind NAT, behind CGNAT and on a 4G dongle.
         #
-        # persistent-keepalive is not optional here: a NAT mapping with no
-        # traffic through it commonly disappears in about 30 seconds, and the
-        # platform would then only reach this router while it happened to be
-        # talking to us.
+        # Three settings here decide whether the platform feels instant or feels
+        # broken, and none of them is about bandwidth:
+        #
+        #   persistent-keepalive — a NAT mapping with no traffic through it
+        #     commonly disappears in about 30 seconds, and WireGuard itself
+        #     rekeys after two minutes of silence. {$keepalive}s sits inside both, so
+        #     the tunnel is already up at the moment somebody pays rather than
+        #     being rebuilt while they wait.
+        #
+        #   mtu={$mtu} — under RouterOS's 1420 default on purpose. On a PPPoE
+        #     line or a 4G dongle the default is too big, and a path that
+        #     swallows the "packet too large" reply turns that into a
+        #     conversation that hangs rather than one that fails.
+        #
+        #   the mangle rules below — management traffic is never given a packet
+        #     mark, so queue trees an ISP adds later to shape subscribers cannot
+        #     put a provisioning command behind somebody's download.
         # ---------------------------------------------------------------------
 
         # The peer goes before the interface it belongs to is removed, for the same reason
@@ -545,7 +560,7 @@ class RouterSetupScript
         /interface/wireguard remove [find name="{$interface}"]
 
         /interface/wireguard
-        add name="{$interface}" private-key="{$router->wg_private_key}" comment="Managed by the platform"
+        add name="{$interface}" private-key="{$router->wg_private_key}" mtu={$mtu} comment="Managed by the platform"
 
         /interface/wireguard/peers
         add interface="{$interface}" \\
@@ -558,6 +573,25 @@ class RouterSetupScript
 
         /ip/address
         add address={$address}/{$mask} interface="{$interface}" comment="Management address"
+
+        # Management traffic is tiny and it is what a paying customer is waiting
+        # on. Taken out of mangle before any marking rule sees it, so a queue
+        # tree an ISP adds later to shape their subscribers cannot put a
+        # provisioning command behind somebody's download.
+        /ip/firewall/mangle
+        remove [find comment="platform-management"]
+        add chain=prerouting in-interface="{$interface}" action=accept \\
+            place-before=0 comment="platform-management"
+        add chain=output out-interface="{$interface}" action=accept \\
+            place-before=1 comment="platform-management"
+
+        # Nudge the tunnel awake rather than waiting for the first keepalive, so
+        # the platform can reach this router the moment the paste finishes
+        # instead of up to {$keepalive} seconds later.
+        :delay 2s;
+        :do {
+            /ping address={$server} interface="{$interface}" count=2 as-value
+        } on-error={ :put "Tunnel has not come up yet — it will retry by itself."; }
         SCRIPT;
     }
 

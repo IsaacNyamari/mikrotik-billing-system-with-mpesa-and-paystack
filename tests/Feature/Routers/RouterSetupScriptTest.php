@@ -59,7 +59,35 @@ class RouterSetupScriptTest extends TestCase
         // the NAT mapping expiring the moment the router goes quiet.
         $this->assertStringContainsString('endpoint-address=isp.solforbs.com', $script);
         $this->assertStringContainsString('endpoint-port=51820', $script);
-        $this->assertStringContainsString('persistent-keepalive=25s', $script);
+        $this->assertStringContainsString(
+            'persistent-keepalive='.config('wireguard.keepalive_seconds').'s',
+            $script,
+        );
+    }
+
+    #[Test]
+    public function the_tunnel_is_configured_to_stay_awake_and_to_answer_quickly(): void
+    {
+        $script = $this->script();
+
+        // A tunnel that has to be rebuilt is what a customer experiences as a slow portal, so
+        // the keepalive has to be inside both the usual NAT timeout and WireGuard's own two
+        // minute rekey. Asserted as a bound rather than a number: the value may be tuned, but
+        // going above 30 would quietly reintroduce the delay this is here to remove.
+        $this->assertLessThanOrEqual(30, (int) config('wireguard.keepalive_seconds'));
+
+        // Under RouterOS's 1420 default, so a PPPoE line or a mobile uplink cannot fragment
+        // management traffic — which fails as a command that hangs rather than one that errors.
+        $this->assertStringContainsString('mtu='.config('wireguard.mtu'), $script);
+        $this->assertLessThan(1420, (int) config('wireguard.mtu'));
+
+        // Management traffic leaves mangle before any marking rule sees it, so a queue tree an
+        // ISP adds later cannot put a provisioning command behind a customer's download.
+        $this->assertStringContainsString('comment="platform-management"', $script);
+
+        // The tunnel is nudged awake at the end of the paste rather than waiting for the first
+        // keepalive, so the platform can reach the router the moment the operator is finished.
+        $this->assertStringContainsString('/ping address=10.8.0.1', $script);
     }
 
     #[Test]

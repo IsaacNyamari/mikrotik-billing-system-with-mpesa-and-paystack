@@ -60,6 +60,38 @@ class PlanProfileSynchroniser
     }
 
     /**
+     * Make sure the plan's profile is on the router, without pushing it again if it already is.
+     *
+     * `sync()` is two round trips down the tunnel — a print to see whether the profile exists,
+     * then an add or a set — and it runs in front of every HotSpot login issued. That is a
+     * customer standing on a captive portal, having just paid, paying for the platform to
+     * rewrite a profile that has not changed since the last person bought the same package.
+     *
+     * The profile is pushed again when the plan has been edited since the last push, so an ISP
+     * changing a speed still sees it reach the device. It is not a cache of the router's state:
+     * anything that failed, or was never pushed, goes through the full sync as before.
+     */
+    public function ensure(Plan $plan, Router $router): PlanRouterProfile
+    {
+        $pairing = PlanRouterProfile::query()
+            ->where('plan_id', $plan->id)
+            ->where('router_id', $router->id)
+            ->first();
+
+        if ($pairing === null || ! $pairing->isSynced()) {
+            return $this->sync($plan, $router);
+        }
+
+        // updated_at is nullable in theory; a plan with no timestamp is one we cannot date, so
+        // it is pushed rather than assumed current.
+        if ($plan->updated_at === null || $pairing->synced_at?->lessThan($plan->updated_at) !== false) {
+            return $this->sync($plan, $router);
+        }
+
+        return $pairing;
+    }
+
+    /**
      * Push a plan to every router this ISP has.
      *
      * @return array<int, PlanRouterProfile>
