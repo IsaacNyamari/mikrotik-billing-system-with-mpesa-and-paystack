@@ -188,7 +188,7 @@ class EarningsAndMpesaSettingsTest extends TestCase
         $this->actingAs($this->owner);
 
         Livewire::test('pages::settings.mpesa')
-            ->set('short_code', '174379')
+            ->set('collection_number', '174379')
             ->set('consumer_key', 'the-key')
             ->set('consumer_secret', 'the-secret')
             ->set('passkey', 'the-passkey')
@@ -209,7 +209,7 @@ class EarningsAndMpesaSettingsTest extends TestCase
         $this->actingAs($this->owner);
 
         Livewire::test('pages::settings.mpesa')
-            ->set('short_code', '174379')
+            ->set('collection_number', '174379')
             ->set('consumer_key', 'the-key')
             ->set('consumer_secret', 'the-secret')
             ->set('passkey', 'the-passkey')
@@ -234,7 +234,7 @@ class EarningsAndMpesaSettingsTest extends TestCase
         $this->actingAs($this->owner);
 
         Livewire::test('pages::settings.mpesa')
-            ->set('short_code', '555555')
+            ->set('collection_number', '555555')
             ->call('save')
             ->assertHasNoErrors();
 

@@ -3,6 +3,7 @@
 use App\Enums\PaymentProvider;
 use App\Models\MpesaConfiguration;
 use App\Models\PaystackConfiguration;
+use App\Services\Payments\DarajaCredentials;
 use App\Services\Payments\PaymentGatewayManager;
 use App\Support\Audit\AuditLogger;
 use App\Support\Tenancy\Facades\Tenancy;
@@ -24,8 +25,8 @@ new #[Title('Payments')] class extends Component {
     public string $paystack_billing_email = '';
 
     public string $environment = 'sandbox';
-    public string $short_code = '';
-    public string $party_b = '';
+    /** The till or paybill the ISP's customers pay into. The only M-PESA field most will see. */
+    public string $collection_number = '';
     public string $transaction_type = 'CustomerPayBillOnline';
     public string $account_reference = 'INTERNET';
     public bool $is_active = true;
@@ -59,8 +60,7 @@ new #[Title('Payments')] class extends Component {
 
         $this->fill([
             'environment' => $configuration->environment,
-            'short_code' => $configuration->short_code,
-            'party_b' => (string) $configuration->party_b,
+            'collection_number' => $configuration->collectionNumber(),
             'transaction_type' => $configuration->transaction_type,
             'account_reference' => $configuration->account_reference,
             'is_active' => $configuration->is_active,
@@ -169,20 +169,53 @@ new #[Title('Payments')] class extends Component {
     /**
      * @return array<string, mixed>
      */
+    /**
+     * Whether the platform signs Daraja requests on this ISP's behalf.
+     *
+     * When it does, the ISP is asked for one thing — the number their money should land in —
+     * and never sees a consumer key. Most ISPs have a till and nothing else, and the ones who
+     * go and obtain the rest usually arrive with something pasted into the wrong field.
+     */
+    #[Computed(persist: false)]
+    public function platformSigns(): bool
+    {
+        return app(DarajaCredentials::class)->platformCanSign();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     protected function rules(): array
     {
-        $isNew = $this->configuration === null;
-
-        return [
-            'environment' => ['required', Rule::in(['sandbox', 'live'])],
-            'short_code' => ['required', 'string', 'max:16'],
-            'party_b' => ['nullable', 'string', 'max:16'],
+        $rules = [
+            'collection_number' => ['required', 'string', 'regex:/^\d{5,9}$/'],
             'transaction_type' => ['required', Rule::in(['CustomerPayBillOnline', 'CustomerBuyGoodsOnline'])],
             'account_reference' => ['required', 'string', 'max:12'],
             'is_active' => ['boolean'],
+        ];
+
+        if ($this->platformSigns) {
+            return $rules;
+        }
+
+        // No platform app to sign with, so this installation still needs the ISP's own.
+        $isNew = $this->configuration === null;
+
+        return $rules + [
+            'environment' => ['required', Rule::in(['sandbox', 'live'])],
             'consumer_key' => [$isNew ? 'required' : 'nullable', 'string', 'max:255'],
             'consumer_secret' => [$isNew ? 'required' : 'nullable', 'string', 'max:255'],
             'passkey' => [$isNew ? 'required' : 'nullable', 'string', 'max:255'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function messages(): array
+    {
+        return [
+            'collection_number.regex' => __('A till or paybill number is 5 to 9 digits, like 174379.'),
         ];
     }
 
@@ -196,17 +229,24 @@ new #[Title('Payments')] class extends Component {
         $isNew = ! $configuration->exists;
 
         $configuration->fill([
-            'environment' => $validated['environment'],
-            'short_code' => $validated['short_code'],
-            'party_b' => $validated['party_b'] !== '' ? $validated['party_b'] : null,
             'transaction_type' => $validated['transaction_type'],
             'account_reference' => $validated['account_reference'],
             'is_active' => $validated['is_active'],
         ]);
 
-        foreach (['consumer_key', 'consumer_secret', 'passkey'] as $secret) {
-            if ($validated[$secret] !== '') {
-                $configuration->{$secret} = $validated[$secret];
+        // Where the ISP's money lands. Held in party_b as well as short_code: when the
+        // platform signs, the shortcode on the wire is the platform's and party_b is what
+        // makes the money arrive at this ISP instead.
+        $configuration->short_code = $validated['collection_number'];
+        $configuration->party_b = $validated['collection_number'];
+
+        if (! $this->platformSigns) {
+            $configuration->environment = $validated['environment'];
+
+            foreach (['consumer_key', 'consumer_secret', 'passkey'] as $secret) {
+                if (($validated[$secret] ?? '') !== '') {
+                    $configuration->{$secret} = $validated[$secret];
+                }
             }
         }
 
@@ -216,7 +256,7 @@ new #[Title('Payments')] class extends Component {
         $audit->record(
             event: $isNew ? 'mpesa.configured' : 'mpesa.updated',
             auditable: $configuration,
-            description: sprintf('M-PESA settings saved (%s, short code %s)', $configuration->environment, $configuration->short_code),
+            description: sprintf('M-PESA settings saved (paid into %s)', $configuration->collectionNumber()),
         );
 
         $this->reset(['consumer_key', 'consumer_secret', 'passkey']);
@@ -278,7 +318,7 @@ new #[Title('Payments')] class extends Component {
 
         <flux:separator :text="__('M-PESA (Daraja)')" />
 
-        @if ($this->configuration)
+        @if ($this->configuration && ! $this->platformSigns)
             <flux:card class="flex flex-col gap-3">
                 <div>
                     <flux:heading size="lg">{{ __('Callback URL') }}</flux:heading>
@@ -298,77 +338,97 @@ new #[Title('Payments')] class extends Component {
                     {{ __('The code at the end is what proves a callback came from your account, so treat this URL as a secret. It must be reachable from the public internet.') }}
                 </flux:text>
             </flux:card>
-        @else
+        @elseif (! $this->configuration)
             <flux:callout icon="information-circle">
                 <flux:callout.heading>{{ __('Not set up yet') }}</flux:callout.heading>
                 <flux:callout.text>
-                    {{ __('Until this is saved, customers cannot buy packages from the captive portal. Your callback URL is generated once you save.') }}
+                    {{ __('Until this is saved, customers cannot buy packages from the captive portal.') }}
                 </flux:callout.text>
             </flux:callout>
         @endif
 
         <form wire:submit="save" class="flex flex-col gap-6">
-            <flux:radio.group wire:model="environment" :label="__('Environment')" variant="segmented">
-                <flux:radio value="sandbox" :label="__('Sandbox')" />
-                <flux:radio value="live" :label="__('Live')" />
+            @if ($this->platformSigns)
+                <flux:callout icon="check-circle">
+                    <flux:callout.heading>{{ __('You only need your till or paybill number') }}</flux:callout.heading>
+                    <flux:callout.text>
+                        {{ __('The Safaricom side is handled for you — there is no Daraja app to apply for, and no consumer key, secret or passkey to obtain. Tell us where the money should land and your portal can start selling.') }}
+                    </flux:callout.text>
+                </flux:callout>
+            @endif
+
+            <flux:radio.group wire:model.live="transaction_type" :label="__('What do your customers pay into?')" variant="cards" class="flex-col">
+                <flux:radio
+                    value="CustomerBuyGoodsOnline"
+                    :label="__('A till number (Buy Goods)')"
+                    :description="__('The number on your Lipa na M-PESA till.')"
+                />
+                <flux:radio
+                    value="CustomerPayBillOnline"
+                    :label="__('A paybill number')"
+                    :description="__('A business shortcode customers pay with an account number.')"
+                />
             </flux:radio.group>
 
-            <div class="grid gap-6 sm:grid-cols-2">
-                <flux:input
-                    wire:model="short_code"
-                    :label="__('Short code')"
-                    required
-                    :description="__('Your paybill or till number.')"
-                />
-                <flux:input
-                    wire:model="party_b"
-                    :label="__('Party B')"
-                    :description="__('Only if money settles to a different number.')"
-                />
-            </div>
-
-            <flux:select wire:model="transaction_type" :label="__('Transaction type')">
-                <flux:select.option value="CustomerPayBillOnline">{{ __('Pay Bill') }}</flux:select.option>
-                <flux:select.option value="CustomerBuyGoodsOnline">{{ __('Buy Goods (Till)') }}</flux:select.option>
-            </flux:select>
+            <flux:input
+                wire:model="collection_number"
+                :label="$transaction_type === 'CustomerBuyGoodsOnline' ? __('Your till number') : __('Your paybill number')"
+                required
+                inputmode="numeric"
+                placeholder="174379"
+                :description="__('Where your customers\' money lands. It stays yours — the platform never holds it.')"
+            />
 
             <flux:input
                 wire:model="account_reference"
-                :label="__('Account reference')"
+                :label="__('What appears on the M-PESA message')"
                 required
-                :description="__('Shown on the customer\'s M-PESA message. Twelve characters at most.')"
+                :description="__('Twelve characters at most, e.g. your business name.')"
             />
 
-            <flux:separator :text="__('API credentials')" />
+            @unless ($this->platformSigns)
+                <flux:separator :text="__('API credentials')" />
 
-            @if ($this->configuration)
-                <flux:text size="sm" class="opacity-70">
-                    {{ __('Stored credentials are never shown again. Leave a field blank to keep it as it is.') }}
-                </flux:text>
-            @endif
+                <flux:callout variant="warning" icon="exclamation-triangle">
+                    <flux:callout.text>
+                        {{ __('This installation has no Daraja app of its own, so it cannot sign requests for you. Until an administrator sets one up, your own Daraja credentials are needed here.') }}
+                    </flux:callout.text>
+                </flux:callout>
 
-            <flux:input
-                wire:model="consumer_key"
-                type="password"
-                :label="__('Consumer key')"
-                :required="! $this->configuration"
-                autocomplete="off"
-            />
-            <flux:input
-                wire:model="consumer_secret"
-                type="password"
-                :label="__('Consumer secret')"
-                :required="! $this->configuration"
-                autocomplete="off"
-            />
-            <flux:input
-                wire:model="passkey"
-                type="password"
-                :label="__('Passkey')"
-                :required="! $this->configuration"
-                autocomplete="off"
-                :description="__('The Lipa na M-PESA online passkey from your Daraja app.')"
-            />
+                <flux:radio.group wire:model="environment" :label="__('Environment')" variant="segmented">
+                    <flux:radio value="sandbox" :label="__('Sandbox')" />
+                    <flux:radio value="live" :label="__('Live')" />
+                </flux:radio.group>
+
+                @if ($this->configuration)
+                    <flux:text size="sm" class="opacity-70">
+                        {{ __('Stored credentials are never shown again. Leave a field blank to keep it as it is.') }}
+                    </flux:text>
+                @endif
+
+                <flux:input
+                    wire:model="consumer_key"
+                    type="password"
+                    :label="__('Consumer key')"
+                    :required="! $this->configuration"
+                    autocomplete="off"
+                />
+                <flux:input
+                    wire:model="consumer_secret"
+                    type="password"
+                    :label="__('Consumer secret')"
+                    :required="! $this->configuration"
+                    autocomplete="off"
+                />
+                <flux:input
+                    wire:model="passkey"
+                    type="password"
+                    :label="__('Passkey')"
+                    :required="! $this->configuration"
+                    autocomplete="off"
+                    :description="__('The Lipa na M-PESA online passkey from your Daraja app.')"
+                />
+            @endunless
 
             <flux:switch
                 wire:model="is_active"

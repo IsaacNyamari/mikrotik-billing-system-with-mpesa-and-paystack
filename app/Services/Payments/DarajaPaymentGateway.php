@@ -23,7 +23,10 @@ class DarajaPaymentGateway implements PaymentGateway
     /** Safaricom's ResultCode for a prompt the customer dismissed. */
     protected const CANCELLED_BY_USER = 1032;
 
-    public function __construct(protected MpesaGateway $daraja) {}
+    public function __construct(
+        protected MpesaGateway $daraja,
+        protected DarajaCredentials $credentials,
+    ) {}
 
     public function provider(): PaymentProvider
     {
@@ -118,8 +121,17 @@ class DarajaPaymentGateway implements PaymentGateway
         return $this->configuration() !== null;
     }
 
+    /**
+     * The configuration a request is actually signed with.
+     *
+     * Usually the platform's Daraja app paying into this ISP's till — an ISP should not need
+     * consumer keys and a passkey of their own before they can sell an hour of wifi. An ISP
+     * that already has its own app keeps using it.
+     */
     protected function configuration(): ?MpesaConfiguration
     {
-        return MpesaConfiguration::query()->where('is_active', true)->first();
+        return $this->credentials->resolve(
+            MpesaConfiguration::query()->where('is_active', true)->first(),
+        );
     }
 }

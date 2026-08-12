@@ -293,6 +293,29 @@ setup ones would also tell a stranger on the wifi about the ISP's own configurat
 `DarajaPaymentGateway` is a thin adapter over the existing M-PESA code rather than a rewrite:
 that path is the one proven against a real Safaricom account.
 
+### An ISP gives us a till, not a Daraja app
+
+Most ISPs have a till and nothing else. Obtaining consumer keys and a passkey is a fortnight of
+Safaricom paperwork, and the ones who manage it usually arrive with something pasted into the
+wrong field. So **the platform's Daraja app signs, and the ISP supplies only where the money
+lands** — `DarajaCredentials::resolve()` builds an unsaved configuration carrying the platform's
+credentials with the ISP's number as `PartyB`.
+
+Daraja separates the two: `BusinessShortCode` is who the request authenticates as, `PartyB` is
+who gets paid. That split is the whole arrangement, and the schema already had both.
+
+- **Safaricom will not route to a `PartyB` the signing shortcode is not authorised for.** That
+  is their rule, not a limitation here. Running this as a platform means holding the commercial
+  arrangement with Safaricom that links ISPs' tills to the head-office shortcode; without it
+  Daraja refuses the push and the refusal lands on the payment row like any other.
+- An ISP that already holds its own Daraja app **keeps using it** — their credentials sit on
+  their own row and `resolve()` leaves them alone.
+- Where the platform has no app either, the ISP is still asked for credentials. Accepting a till
+  number with nothing to sign it with would fail every payment quietly.
+- The callback still carries the **ISP's** token, so a result signed by the platform finds the
+  ISP it belongs to.
+- Paystack is untouched by this: an ISP using it brings their own account, as before.
+
 ### Credentials are per ISP, in the database
 
 Every tenant collects into its own till, so `mpesa_configurations` is tenant-owned: one row per

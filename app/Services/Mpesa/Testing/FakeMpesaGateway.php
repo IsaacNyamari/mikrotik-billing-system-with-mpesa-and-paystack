@@ -20,6 +20,13 @@ class FakeMpesaGateway implements MpesaGateway
      */
     public array $pushes = [];
 
+    /**
+     * The configuration each push was signed with, in order.
+     *
+     * @var array<int, MpesaConfiguration>
+     */
+    public array $configurations = [];
+
     protected ?string $rejectWith = null;
 
     /** @var array<string, mixed>|null */
@@ -39,6 +46,11 @@ class FakeMpesaGateway implements MpesaGateway
             'reference' => $accountReference,
             'callback' => $callbackUrl,
         ];
+
+        // Kept so a test can ask *which* Daraja app signed this: the platform now signs on
+        // behalf of ISPs who have only a till, and getting that wrong sends somebody else's
+        // money to the wrong number.
+        $this->configurations[] = $configuration;
 
         if ($this->rejectWith !== null) {
             $message = $this->rejectWith;
@@ -102,5 +114,13 @@ class FakeMpesaGateway implements MpesaGateway
     public function lastPush(): ?array
     {
         return $this->pushes[count($this->pushes) - 1] ?? null;
+    }
+
+    /**
+     * Which Daraja app signed the last push, and who it named as the payee.
+     */
+    public function lastConfiguration(): ?MpesaConfiguration
+    {
+        return $this->configurations[count($this->configurations) - 1] ?? null;
     }
 }

@@ -72,6 +72,26 @@ class MpesaConfiguration extends Model
         ];
     }
 
+    /**
+     * The till or paybill an ISP's customers actually pay into.
+     *
+     * `party_b` when it is set, because an ISP signing with the platform's Daraja app records
+     * their own number there while the shortcode belongs to the platform. Otherwise the
+     * shortcode is their own and is the same thing.
+     */
+    public function collectionNumber(): string
+    {
+        return (string) ($this->party_b ?: $this->short_code);
+    }
+
+    /**
+     * Whether this ISP is a till (Buy Goods) rather than a paybill.
+     */
+    public function isTill(): bool
+    {
+        return $this->transaction_type === 'CustomerBuyGoodsOnline';
+    }
+
     public function isLive(): bool
     {
         return $this->environment === 'live';
