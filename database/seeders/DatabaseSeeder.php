@@ -22,10 +22,27 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        // The catalogue is seeded everywhere, and has to be: registration assigns a role, so
+        // without it signing up fails outright. It carries no credentials.
         $this->call([
             PermissionSeeder::class,
             RoleSeeder::class,
         ]);
+
+        // Everything past here is development scaffolding, and none of it may exist on a
+        // server.
+        //
+        // The super admin below used to be created before this guard, which meant
+        // `migrate --seed` produced a platform-wide administrator with the password
+        // "password" in any environment at all. Production never got one only because
+        // deploy/release.sh happens to run `migrate --force` without `--seed` — a convention
+        // holding a door shut rather than a lock, and one command away from failing.
+        //
+        // A real administrator is made by `php artisan platform:admin`, which asks for the
+        // password instead of knowing it.
+        if (! app()->isLocal()) {
+            return;
+        }
 
         $superAdmin = User::query()->firstOrCreate(
             ['email' => 'admin@isp.solforbs.com'],
@@ -38,10 +55,6 @@ class DatabaseSeeder extends Seeder
         );
 
         $superAdmin->assignRole(Roles::PLATFORM_SUPER_ADMIN);
-
-        if (! app()->isLocal()) {
-            return;
-        }
 
         $tenant = Tenant::query()->firstOrCreate(
             ['slug' => 'demo-isp'],
