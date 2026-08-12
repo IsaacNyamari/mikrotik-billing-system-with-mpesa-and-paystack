@@ -4,6 +4,7 @@ use App\Http\Controllers\HotspotPageController;
 use App\Http\Controllers\MpesaCallbackController;
 use App\Http\Controllers\PaystackWebhookController;
 use App\Http\Controllers\PlatformMpesaCallbackController;
+use App\Http\Controllers\PlatformPaystackWebhookController;
 use App\Http\Controllers\RouterProvisionController;
 use Illuminate\Support\Facades\Route;
 
@@ -43,6 +44,11 @@ Route::get('provision/{token}', RouterProvisionController::class)
 // own token: the tenant callback looks payments up in a table this money never touches.
 Route::post('webhooks/platform/mpesa/{token}', PlatformMpesaCallbackController::class)
     ->name('webhooks.platform-mpesa');
+
+// The same, for an ISP paying their subscription through Paystack. Signed, so it needs no
+// token in the path — and checked against the platform's key rather than any ISP's.
+Route::post('webhooks/platform/paystack', PlatformPaystackWebhookController::class)
+    ->name('webhooks.platform-paystack');
 
 // Reachable however much an ISP owes — locking someone out of the page where they pay turns
 // every late payment into a phone call.

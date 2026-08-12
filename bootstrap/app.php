@@ -43,6 +43,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'webhooks/mpesa/*',
             'webhooks/paystack',
             'webhooks/platform/mpesa/*',
+            'webhooks/platform/paystack',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

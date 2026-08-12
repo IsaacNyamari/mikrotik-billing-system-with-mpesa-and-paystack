@@ -56,25 +56,49 @@ class PaystackGateway implements PaymentGateway
             );
         }
 
+        return $this->chargeMobileMoney(
+            configuration: $configuration,
+            amount: (float) $plan->price,
+            phone: $normalised,
+            email: $email,
+            reference: $reference,
+            metadata: ['plan' => $plan->name, 'plan_code' => $plan->code],
+        );
+    }
+
+    /**
+     * Prompt a phone for an amount, whoever is being paid.
+     *
+     * Shared by an ISP collecting from a customer and by the platform collecting a
+     * subscription from an ISP. Same API, same reading of the answer — two copies of this
+     * would drift, and the one that drifted would be the one nobody was watching.
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    public function chargeMobileMoney(
+        PaystackConfiguration $configuration,
+        float $amount,
+        string $phone,
+        string $email,
+        string $reference,
+        array $metadata = [],
+    ): ChargeResult {
         try {
             $response = $this->client($configuration)->post('/charge', [
                 'email' => $email,
                 // Paystack works in the currency's smallest unit, so KES goes over as cents.
                 // Rounding up rather than down, for the same reason as Daraja.
-                'amount' => (int) ceil((float) $plan->price) * 100,
+                'amount' => (int) ceil($amount) * 100,
                 'currency' => $configuration->currency,
                 'reference' => $reference,
                 'mobile_money' => [
                     // E.164 with the plus. Paystack rejects both 2547XXXXXXXX — which is
                     // exactly what Daraja insists on — and the local 07XXXXXXXX, as an
                     // "invalid phone number format".
-                    'phone' => PhoneNumber::e164($normalised),
+                    'phone' => PhoneNumber::e164($phone),
                     'provider' => 'mpesa',
                 ],
-                'metadata' => [
-                    'plan' => $plan->name,
-                    'plan_code' => $plan->code,
-                ],
+                'metadata' => $metadata,
             ]);
         } catch (Throwable $e) {
             return ChargeResult::rejected($e->getMessage());
@@ -106,6 +130,29 @@ class PaystackGateway implements PaymentGateway
             isset($body['data']['id']) ? (string) $body['data']['id'] : null,
             $body,
         );
+    }
+
+    /**
+     * Ask Paystack what became of a reference, using credentials given rather than the
+     * tenant's own. The platform's subscription charges are not any ISP's.
+     */
+    public function verifyWith(PaystackConfiguration $configuration, string $reference): VerificationResult
+    {
+        try {
+            $response = $this->client($configuration)->get('/transaction/verify/'.urlencode($reference));
+        } catch (Throwable $e) {
+            Log::warning('Paystack verification failed', ['reference' => $reference, 'error' => $e->getMessage()]);
+
+            return VerificationResult::unknown();
+        }
+
+        $body = $response->json() ?? [];
+
+        if (! $response->successful() || ($body['status'] ?? false) !== true || ! is_array($body['data'] ?? null)) {
+            return VerificationResult::unknown(is_array($body) ? $body : []);
+        }
+
+        return $this->interpret($body['data']);
     }
 
     public function verify(string $reference): VerificationResult

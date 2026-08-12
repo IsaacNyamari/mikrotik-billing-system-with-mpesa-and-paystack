@@ -67,6 +67,20 @@ return [
     |
     */
 
+    'paystack' => [
+        // Preferred over the Daraja block below when both are set: an ISP paying a
+        // subscription is prompted the same way either way, and Paystack needs no
+        // Safaricom paperwork of its own.
+        'enabled' => env('PLATFORM_PAYSTACK_ENABLED', false),
+        'secret_key' => env('PLATFORM_PAYSTACK_SECRET_KEY'),
+        'public_key' => env('PLATFORM_PAYSTACK_PUBLIC_KEY'),
+        'currency' => env('PLATFORM_PAYSTACK_CURRENCY', 'KES'),
+
+        // Paystack insists on an email per charge. The ISP's own contact address is used
+        // where they have one; this is the fallback when they do not.
+        'billing_email' => env('PLATFORM_PAYSTACK_BILLING_EMAIL'),
+    ],
+
     'mpesa' => [
         'enabled' => env('PLATFORM_MPESA_ENABLED', false),
         'environment' => env('PLATFORM_MPESA_ENV', 'sandbox'),

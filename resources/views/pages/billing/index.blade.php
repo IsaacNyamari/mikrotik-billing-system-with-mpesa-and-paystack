@@ -6,7 +6,6 @@ use App\Models\TenantPayment;
 use App\Models\TenantSubscription;
 use App\Services\Platform\BillingCalculator;
 use App\Services\Platform\PlatformBilling;
-use App\Services\Platform\PlatformTill;
 use App\Services\Platform\SubscriptionCollector;
 use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Support\Collection;
@@ -112,13 +111,13 @@ new #[Title('Subscription')] class extends Component {
     #[Computed]
     public function tillIsReady(): bool
     {
-        return app(PlatformTill::class)->isConfigured();
+        return app(SubscriptionCollector::class)->isConfigured();
     }
 
     #[Computed]
     public function tillProblem(): ?string
     {
-        return app(PlatformTill::class)->unconfiguredReason();
+        return app(SubscriptionCollector::class)->unconfiguredReason();
     }
 
     public function pay(SubscriptionCollector $collector): void
@@ -145,9 +144,23 @@ new #[Title('Subscription')] class extends Component {
 
     /**
      * Polled while the prompt is on the operator's phone.
+     *
+     * Asks the provider outright rather than waiting to be told. A webhook only arrives if the
+     * provider can reach this installation, and an ISP holding a confirmation SMS while their
+     * console stays locked will pay a second time rather than wait.
      */
-    public function checkPayment(): void
+    public function checkPayment(SubscriptionCollector $collector): void
     {
+        unset($this->payment, $this->subscription, $this->dueInvoice, $this->invoices);
+
+        $payment = $this->payment;
+
+        if ($payment === null || $payment->status !== PaymentStatus::Pending) {
+            return;
+        }
+
+        $collector->reconcile($payment);
+
         unset($this->payment, $this->subscription, $this->dueInvoice, $this->invoices);
 
         $payment = $this->payment;
