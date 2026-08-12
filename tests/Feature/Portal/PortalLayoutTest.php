@@ -170,11 +170,18 @@ class PortalLayoutTest extends TestCase
 
         $html = $component->call('checkPayment')->html();
 
-        // The credentials are posted to the router the moment the page renders. The only
-        // button in the markup is the one kept hidden for a browser that blocks that.
-        $this->assertStringContainsString('form.submit()', $html);
-        $this->assertStringContainsString('id="hotspot-login-fallback" hidden', $html);
-        $this->assertStringNotContainsString('Connect now', $html);
+        // Signed in by navigating to the router, not by posting a form to it. This page is
+        // https and the router's login is plain http inside the network — Chrome refuses that
+        // form submission, silently, which a customer who has just paid experiences as
+        // nothing happening at all.
+        $this->assertStringContainsString('http://10.10.10.1/login?username=GDGDAHXS', $html);
+        $this->assertStringContainsString('window.location.href', $html);
+        $this->assertStringNotContainsString('<form method="post" action="http://10.10.10.1/login"', $html);
+
+        // And a link they can see, because a phone that drifted onto mobile data while paying
+        // cannot reach the router at all — the automatic hop fails with nothing to show for it.
+        $this->assertStringContainsString('Connect now', $html);
+        $this->assertStringContainsString('Rejoin the wifi', $html);
     }
 
     #[Test]

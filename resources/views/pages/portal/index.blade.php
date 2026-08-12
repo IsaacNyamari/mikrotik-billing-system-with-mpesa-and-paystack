@@ -331,31 +331,39 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                  Submitted the moment it renders, with nothing for the customer to press: they
                  have paid, and being asked to confirm that they would like what they just bought
                  is the kind of step that strands people on a page. --}}
-            <form method="post" action="{{ $loginUrl }}" id="hotspot-login">
-                <input type="hidden" name="username" value="{{ $access->username }}">
-                <input type="hidden" name="password" value="{{ $access->password }}">
+            {{-- A plain link, not a form.
 
-                {{-- Revealed only if the submit below has not navigated away. Nobody sees it in
-                     the ordinary case; it exists so a browser that blocks the automatic post
-                     leaves the customer with a way through rather than a dead page. --}}
-                <button type="submit" class="btn" id="hotspot-login-fallback" hidden>
-                    {{ __('Tap to connect') }}
-                </button>
-            </form>
+                 This page is served over https and the router's login sits on plain http at
+                 an address inside the network. A form posting across that boundary is what
+                 browsers call an insecure form submission, and Chrome refuses it — usually
+                 without saying anything at all, which is exactly what a customer who has just
+                 paid experiences as "nothing happened". A top-level navigation is not subject
+                 to that rule, so the credentials go in the query string instead: RouterOS
+                 accepts them there for http-pap, which is what this profile is set up for.
+
+                 The link is visible rather than hidden. If the phone has drifted onto mobile
+                 data while paying — which is common, since the M-PESA prompt arrives over the
+                 cellular network — the router is unreachable and the automatic hop fails
+                 silently. Something they can see and tap after rejoining the wifi is the
+                 difference between a working purchase and a refund. --}}
+            @php($signIn = $loginUrl.'?username='.rawurlencode($access->username).'&password='.rawurlencode($access->password))
+
+            <a href="{{ $signIn }}" class="btn" id="hotspot-login" rel="noreferrer">
+                {{ __('Connect now') }}
+            </a>
+
+            <p class="note__text" style="margin-top:.75rem">
+                {{ __('Not connected? Rejoin the wifi, then tap Connect now.') }}
+            </p>
 
             <script>
                 (function () {
-                    var form = document.getElementById('hotspot-login');
-
-                    if (! form) { return; }
-
-                    form.submit();
-
-                    // Still here a few seconds later means the post did not take.
+                    // Given a moment first: the router has only just been told about this
+                    // login, and a device that answers before it knows the code shows the
+                    // customer a failure for something that is about to work.
                     setTimeout(function () {
-                        var fallback = document.getElementById('hotspot-login-fallback');
-                        if (fallback) { fallback.hidden = false; }
-                    }, 4000);
+                        window.location.href = {!! json_encode($signIn) !!};
+                    }, 800);
                 })();
             </script>
         @else
