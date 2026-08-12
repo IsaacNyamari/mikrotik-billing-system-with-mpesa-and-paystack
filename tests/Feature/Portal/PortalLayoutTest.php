@@ -168,15 +168,25 @@ class PortalLayoutTest extends TestCase
             ]],
         ]);
 
-        $html = $component->call('checkPayment')->html();
+        $settled = $component->call('checkPayment');
+        $html = $settled->html();
 
         // Signed in by navigating to the router, not by posting a form to it. This page is
         // https and the router's login is plain http inside the network — Chrome refuses that
         // form submission, silently, which a customer who has just paid experiences as
         // nothing happening at all.
         $this->assertStringContainsString('http://10.10.10.1/login?username=GDGDAHXS', $html);
-        $this->assertStringContainsString('window.location.href', $html);
         $this->assertStringNotContainsString('<form method="post" action="http://10.10.10.1/login"', $html);
+
+        // The navigation is driven by an event, not by a script in this markup. This panel
+        // arrives through a polled update, which patches the DOM rather than reloading it, and
+        // a <script> patched in is never executed — so the hop that was meant to happen "with
+        // nothing to press" fired only on a page reload, which is exactly what a customer
+        // sitting on the payment screen is not doing.
+        $settled->assertDispatched(
+            'portal-connect',
+            url: 'http://10.10.10.1/login?username=GDGDAHXS&password=GDGDAHXS',
+        );
 
         // And a link they can see, because a phone that drifted onto mobile data while paying
         // cannot reach the router at all — the automatic hop fails with nothing to show for it.

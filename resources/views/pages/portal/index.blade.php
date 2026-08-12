@@ -1,15 +1,19 @@
 <?php
 
+use App\Enums\HotspotUserStatus;
 use App\Enums\PaymentStatus;
+use App\Models\HotspotUser;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Router;
 use App\Services\Mpesa\CallbackProcessor;
 use App\Services\Mpesa\PaymentCollector;
 use App\Services\Payments\PaymentReconciler;
+use App\Services\RouterOs\HotspotUserProvisioner;
 use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
@@ -34,9 +38,21 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     #[Locked]
     public ?int $paymentId = null;
 
+    /**
+     * A package the customer already owns, found by its code rather than by paying again.
+     *
+     * Separate from the payment because recovery starts from neither a plan nor a payment: it
+     * starts from somebody holding an M-PESA SMS and no internet.
+     */
+    #[Locked]
+    public ?int $accessId = null;
+
     public ?int $selectedPlanId = null;
 
     public string $phone = '';
+
+    /** The M-PESA code somebody types when they have paid but never got online. */
+    public string $code = '';
 
     /** Where the MikroTik wants credentials posted, taken from its redirect. */
     #[Locked]
@@ -146,12 +162,67 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         return filter_var($gateway, FILTER_VALIDATE_IP) === false ? null : 'http://'.$gateway.'/login';
     }
 
+    /**
+     * The whole link that signs this customer in, credentials and all.
+     *
+     * Built once here rather than twice: the page renders it as something to tap, and the
+     * component sends the same string to the browser to follow by itself. Two constructions of
+     * one URL is how those two quietly stop agreeing.
+     */
+    #[Computed]
+    public function signInLink(): ?string
+    {
+        $access = $this->access;
+        $url = $this->signInUrl;
+
+        if ($url === null || $access === null || $access->status !== HotspotUserStatus::Active) {
+            return null;
+        }
+
+        return $url.'?username='.rawurlencode($access->username).'&password='.rawurlencode($access->password);
+    }
+
+    /**
+     * Tell the browser to follow the sign-in link.
+     *
+     * The page cannot do this by itself once it is running. The success panel arrives through a
+     * polled update, which patches the DOM rather than loading it, and a `<script>` written into
+     * that patch is never executed — so the automatic hop worked on a page reload and nowhere
+     * else, which is precisely the case that does not happen: a customer who has just paid is
+     * watching a page that is updating itself.
+     *
+     * A dispatched event does reach the listener the page registered when it first loaded.
+     */
+    protected function announceConnection(): void
+    {
+        if (($link = $this->signInLink) !== null) {
+            $this->dispatch('portal-connect', url: $link);
+        }
+    }
+
     #[Computed]
     public function payment(): ?Payment
     {
         return $this->paymentId === null
             ? null
             : Payment::query()->with('hotspotUser')->find($this->paymentId);
+    }
+
+    /**
+     * The package this customer is entitled to right now.
+     *
+     * Either the one they have just paid for or one they recovered with their code — the screen
+     * that follows is the same, because from where they are standing the two are the same thing:
+     * they have paid, and they want to be online.
+     */
+    #[Computed]
+    public function access(): ?HotspotUser
+    {
+        if ($this->accessId !== null) {
+            return HotspotUser::query()->find($this->accessId);
+        }
+
+        return $this->payment?->hotspotUser;
     }
 
     /**
@@ -268,8 +339,22 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         if ($payment->status === PaymentStatus::Paid) {
             if ($payment->hotspot_user_id === null) {
                 $processor->grantAccess($payment);
-                unset($this->payment);
             }
+
+            unset($this->payment, $this->access, $this->signInLink);
+
+            // Written to the router but refused there — the device was down at that moment.
+            // Keep pushing rather than leaving somebody who has paid holding a code the router
+            // has never heard of.
+            $access = $this->access;
+
+            if ($access !== null && $access->status !== HotspotUserStatus::Active && ! $access->hasExpired()) {
+                app(HotspotUserProvisioner::class)->provision($access);
+
+                unset($this->access, $this->signInLink);
+            }
+
+            $this->announceConnection();
 
             return;
         }
@@ -280,7 +365,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
 
         $reconciler->reconcile($payment);
 
-        unset($this->payment);
+        unset($this->payment, $this->access);
         $payment = $this->payment;
 
         if ($payment === null || $payment->status !== PaymentStatus::Pending) {
@@ -301,9 +386,187 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
 
     public function startOver(): void
     {
-        $this->reset(['paymentId', 'selectedPlanId', 'phone']);
+        $this->reset(['paymentId', 'accessId', 'selectedPlanId', 'phone', 'code']);
 
-        unset($this->payment, $this->selectedPlan);
+        unset($this->payment, $this->selectedPlan, $this->access, $this->signInLink);
+    }
+
+    /**
+     * Get somebody back online from their M-PESA code alone.
+     *
+     * This is the way out of every gap between the money moving and the customer being on the
+     * internet, and there are more of those than there ought to be: the router was unreachable
+     * when the callback landed, the phone hopped to mobile data for the M-PESA prompt and never
+     * came back, the browser was closed, the package was bought at the counter, the tab was lost
+     * behind the captive-portal helper. In every one of them the customer has an SMS with a code
+     * in it and no idea which of those things happened — nor should they need one.
+     *
+     * So the code is the whole of what is asked for, and everything behind it is tried in turn:
+     * a login that already exists, a payment that was confirmed but never issued one, and a
+     * payment the provider has not been asked about yet. Only when none of those finds anything
+     * is the customer told the code is unknown.
+     */
+    public function recover(
+        PaymentReconciler $reconciler,
+        CallbackProcessor $processor,
+        HotspotUserProvisioner $provisioner,
+    ): void {
+        // Tidied before it is validated, not after. Somebody copying a code out of an SMS
+        // brings a trailing space with it and reads the characters off in whatever case they
+        // see them, and a page that answers that with a complaint about punctuation is a page
+        // arguing with a customer who has done nothing wrong.
+        $this->code = strtoupper(trim($this->code));
+
+        $this->validate([
+            // M-PESA receipts are ten characters; codes issued at a counter are the same shape.
+            // The bound is loose on purpose — a customer mistyping is told so by the lookup, in
+            // plain words, rather than by a validator quibbling about length.
+            'code' => ['required', 'string', 'min:6', 'max:32', 'regex:/^[A-Z0-9]+$/'],
+        ], [
+            'code.required' => __('Enter the code from your M-PESA message.'),
+            'code.regex' => __('A code is only letters and numbers, like QGR4TZ8LMN.'),
+            'code.min' => __('That code looks too short. Check your M-PESA message.'),
+        ]);
+
+        // Codes are ten characters from an alphabet of thirty-odd, so guessing one is not a
+        // realistic attack. The limit is here because an unmetered lookup on a public page is
+        // still a public page doing unmetered database work.
+        $key = 'portal-recover:'.$this->routerId.':'.(request()->ip() ?? 'unknown');
+
+        if (RateLimiter::tooManyAttempts($key, 10)) {
+            $this->addError('code', __('Too many tries. Wait a minute, then try again.'));
+
+            return;
+        }
+
+        RateLimiter::hit($key, 60);
+
+        $code = $this->code;
+
+        // Scoped to this router, not just this ISP: the login only exists on the device the
+        // customer is standing in front of, so a code from another branch would be found here
+        // and then fail to let them on — which is worse than not finding it.
+        $access = HotspotUser::query()
+            ->where('router_id', $this->routerId)
+            ->where('username', $code)
+            ->latest('id')
+            ->first();
+
+        if ($access === null) {
+            $access = $this->accessFromPayment($code, $reconciler, $processor);
+
+            // A payment was found and had something to say about itself — an error is already
+            // on the field and it is more use than "code not found".
+            if ($access === null && $this->getErrorBag()->has('code')) {
+                return;
+            }
+        }
+
+        if ($access === null) {
+            $this->addError('code', __('We could not find that code on this network. Check the code in your M-PESA message, or ask at the counter.'));
+
+            return;
+        }
+
+        if ($access->hasExpired() || $access->status->isFinished()) {
+            $this->addError('code', __('That package has already been used up. Buy another one to get back online.'));
+
+            return;
+        }
+
+        // Pushed to the router again whenever it is not known to be live there. The provisioner
+        // updates a row it finds rather than adding a second, so doing this for somebody who was
+        // already fine costs one round trip and changes nothing.
+        if ($access->status !== HotspotUserStatus::Active || $access->routeros_id === null) {
+            $access = $provisioner->provision($access);
+        }
+
+        $this->accessId = $access->id;
+
+        $this->reset(['code']);
+        $this->resetErrorBag();
+
+        unset($this->access, $this->payment, $this->signInLink);
+
+        $this->announceConnection();
+    }
+
+    /**
+     * The access a payment should have bought, chasing it up if it has not yet.
+     *
+     * Adds an error and returns null when the payment is findable but is not access — a
+     * customer whose prompt was cancelled is owed that answer rather than "code not found",
+     * which would send them looking for a typo that is not there.
+     */
+    protected function accessFromPayment(string $code, PaymentReconciler $reconciler, CallbackProcessor $processor): ?HotspotUser
+    {
+        $payment = Payment::query()
+            ->where('router_id', $this->routerId)
+            ->where('receipt', $code)
+            ->latest('id')
+            ->first();
+
+        if ($payment === null) {
+            return null;
+        }
+
+        // Still open: ask the provider outright rather than telling somebody holding a
+        // confirmation SMS that nothing has been paid.
+        if ($payment->status === PaymentStatus::Pending) {
+            $reconciler->reconcile($payment);
+
+            $payment->refresh();
+        }
+
+        if ($payment->status === PaymentStatus::Pending) {
+            $this->addError('code', __('That payment is still being confirmed. Give it a moment and try again.'));
+
+            return null;
+        }
+
+        if ($payment->status !== PaymentStatus::Paid) {
+            $this->addError('code', $payment->customerMessage());
+
+            return null;
+        }
+
+        // Paid, but no login was ever issued — the router was unreachable when the money
+        // landed. This is the case the whole screen exists for.
+        $payment = $processor->grantAccess($payment);
+
+        return $payment->hotspot_user_id === null
+            ? null
+            : HotspotUser::query()->find($payment->hotspot_user_id);
+    }
+
+    /**
+     * Called by wire:poll while a recovered package is still being written to the router.
+     */
+    public function retryAccess(HotspotUserProvisioner $provisioner): void
+    {
+        unset($this->access, $this->signInLink);
+
+        $access = $this->access;
+
+        if ($access === null) {
+            return;
+        }
+
+        if ($access->status === HotspotUserStatus::Active) {
+            $this->announceConnection();
+
+            return;
+        }
+
+        if ($access->hasExpired() || $access->status->isFinished()) {
+            return;
+        }
+
+        $provisioner->provision($access);
+
+        unset($this->access, $this->signInLink);
+
+        $this->announceConnection();
     }
 
     /**
@@ -330,24 +593,41 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         @endif
     </header>
 
-    @if ($this->payment?->status === App\Enums\PaymentStatus::Paid && $this->payment->hotspotUser)
-        @php($access = $this->payment->hotspotUser)
+    {{-- One screen for "you have paid and here is your access", whether the payment happened
+         thirty seconds ago or yesterday and the customer typed their code to get back. From
+         where they are standing those are the same situation. --}}
+    @if ($this->access)
+        @php($access = $this->access)
+        @php($live = $access->status === App\Enums\HotspotUserStatus::Active)
 
-        <div class="note note--good">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
+        {{-- Polled a little slower than the payment screen: each pass is a real attempt to reach
+             a router that has already refused once, and hammering a device that is down helps
+             nobody. hotspot:sweep --retry is trying the same thing in the background. --}}
+        <div class="note note--good" @if (! $live) wire:poll.5s="retryAccess" @endif>
+            <svg @class(['icon', 'pulse' => ! $live]) viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
                 <circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <h2 class="note__title">{{ __('Payment received') }}</h2>
-            <p class="note__text">{{ $this->branding->displaySuccessText() }}</p>
+            <p class="note__text">
+                {{ $live ? $this->branding->displaySuccessText() : __('Setting up your access…') }}
+            </p>
 
             <p class="code">{{ $access->username }}</p>
 
-            @if ($access->expires_at)
+            @if ($live && $access->expires_at)
                 <p class="note__text">{{ __('Valid for :time', ['time' => $access->remainingForHumans()]) }}</p>
             @endif
+
+            @unless ($live)
+                {{-- The code is shown regardless, because it is theirs and the SMS has it
+                     anyway. What is withheld until the router confirms is the Connect button:
+                     sending somebody to a login the device has never heard of hands them a
+                     refusal for something that is about to work. --}}
+                <p class="note__text">{{ __('Keep this page open. This takes a moment.') }}</p>
+            @endunless
         </div>
 
-        @if ($this->signInUrl)
+        @if ($this->signInLink)
             {{-- Posted straight to the MikroTik, which is what actually lets them online. The
                  HotSpot profile accepts http-pap, so the credentials go as plain fields.
 
@@ -369,9 +649,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                  cellular network — the router is unreachable and the automatic hop fails
                  silently. Something they can see and tap after rejoining the wifi is the
                  difference between a working purchase and a refund. --}}
-            @php($signIn = $this->signInUrl.'?username='.rawurlencode($access->username).'&password='.rawurlencode($access->password))
-
-            <a href="{{ $signIn }}" class="btn" id="hotspot-login" rel="noreferrer">
+            <a href="{{ $this->signInLink }}" class="btn" id="hotspot-login" rel="noreferrer">
                 {{ __('Connect now') }}
             </a>
 
@@ -379,17 +657,12 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                 {{ __('Not connected? Rejoin the wifi, then tap Connect now.') }}
             </p>
 
-            <script>
-                (function () {
-                    // Given a moment first: the router has only just been told about this
-                    // login, and a device that answers before it knows the code shows the
-                    // customer a failure for something that is about to work.
-                    setTimeout(function () {
-                        window.location.href = {!! json_encode($signIn) !!};
-                    }, 800);
-                })();
-            </script>
-        @else
+            {{-- Only for a customer who arrives with their access already live — a reload, or
+                 a code recovered on the way in. The polled case cannot be handled here: this
+                 markup is patched into a running page, and a script patched in is never run.
+                 That is what the listener at the bottom of the page is for. --}}
+            <script>window.portalConnect && window.portalConnect(@js($this->signInLink));</script>
+        @elseif ($live)
             <div class="note note--warn">
                 <p class="note__text">{{ __('Now return to the wifi login page and sign in with the code above.') }}</p>
             </div>
@@ -437,7 +710,13 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             <button type="button" class="btn btn--quiet" style="margin-top:1rem" wire:click="startOver">
                 {{ __('Try again') }}
             </button>
+
         </div>
+
+        {{-- Offered here for the one case that looks like this and is not: money that did leave
+             the customer's account while the platform was told otherwise. They have the SMS in
+             their hand, and the code in it is enough. --}}
+        @include('portal.recover', ['heading' => __('Charged anyway?')])
     @elseif ($this->selectedPlan)
         {{-- Second tap: they have chosen, so now — and only now — they are asked for a number. --}}
         @php($plan = $this->selectedPlan)
@@ -572,6 +851,12 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                 @endforeach
             </div>
         @endif
+
+        {{-- Under the packages rather than beside them: almost everyone here is buying, and the
+             few who are not are looking for exactly this. It is offered whether or not packages
+             are on sale — an ISP whose plans are all withdrawn still has customers holding codes
+             they paid for. --}}
+        @include('portal.recover', ['heading' => __('Already paid?')])
     @endif
 
     <footer class="portal__foot">
@@ -591,4 +876,45 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             </p>
         @endif
     </footer>
+
+    {{-- Registered once, when the page first loads and long before anybody has paid.
+
+         This is the whole reason the automatic sign-in works at all. The success panel arrives
+         through a polled update, which patches the DOM rather than reloading it, and a script
+         written into that patch is never executed — so the hop that was supposed to happen
+         "with nothing to press" only ever fired on a page reload, which is not what a customer
+         who has just paid is doing. They watched a page that had their code on it and did
+         nothing, which is indistinguishable from the purchase having failed.
+
+         @script is evaluated by Livewire on the component's own initialisation, so the listener
+         is in place before it is needed and survives every re-render after. --}}
+    @script
+    <script>
+        (function () {
+            let going = false;
+
+            // Named on window so the panel's own inline script can reach it too, for the
+            // customer who arrives with their access already live — a reload, or a code
+            // recovered on the way in.
+            window.portalConnect = function (url) {
+                if (going || ! url) {
+                    return;
+                }
+
+                going = true;
+
+                // Given a moment first: the router has only just been told about this login,
+                // and a device that answers before it knows the code shows the customer a
+                // failure for something that is about to work.
+                setTimeout(function () {
+                    window.location.href = url;
+                }, 800);
+            };
+
+            $wire.on('portal-connect', function (event) {
+                window.portalConnect(Array.isArray(event) ? event[0]?.url : event?.url);
+            });
+        })();
+    </script>
+    @endscript
 </div>

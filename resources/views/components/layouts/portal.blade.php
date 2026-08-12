@@ -139,6 +139,10 @@
                 outline: none; transition: border-color .15s, box-shadow .15s;
             }
             .field__input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgb(var(--brand-channels) / .18); }
+            /* An M-PESA code is read off an SMS one character at a time, so it is typed and
+               checked in the same shape it was received. */
+            .field__input--code { text-transform: uppercase; letter-spacing: .12em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+            .field__input--code::placeholder { letter-spacing: .12em; opacity: .45; }
             .field__input--bad { border-color: #dc2626; }
             .field__input--bad:focus { border-color: #dc2626; box-shadow: 0 0 0 3px rgb(220 38 38 / .15); }
             .field__error { margin: .375rem 0 0; font-size: .8125rem; font-weight: 500; color: #dc2626; }
@@ -179,6 +183,32 @@
             .icon { width: 3rem; height: 3rem; }
             [hidden] { display: none !important; }
 
+            /* The way back in for somebody who has already paid.
+               Quiet, because almost nobody needs it — and a field rather than a link, because
+               the one person who does has no internet and has already paid, and should not have
+               to find and tap something before they can start typing. */
+            .recover { padding: 1rem; }
+            .recover__title { margin: 0; font-size: .9375rem; font-weight: 650; }
+            .recover__hint { margin: .125rem 0 .75rem; font-size: .8125rem; color: #71717a; }
+            .recover__form { margin: 0; }
+            /* Field and button on one line where there is room, stacked on a narrow phone —
+               a code field squeezed to five characters is one people mistype. */
+            .recover__row { display: flex; flex-wrap: wrap; gap: .5rem; }
+            .recover__row .field__input { flex: 1 1 11rem; min-width: 0; }
+            .recover__go { width: auto; flex: 0 0 auto; padding-inline: 1.25rem; }
+            @media (max-width: 22rem) {
+                .recover__row { flex-direction: column; }
+                .recover__go { width: 100%; }
+            }
+
+            /* Present for a screen reader, absent for everyone else: the placeholder already
+               says what the field is, and a label above it would double the height of a panel
+               that is deliberately quiet. */
+            .sr-only {
+                position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+                overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+            }
+
             /* Dark ------------------------------------------------------------------- */
             /* An ISP that has chosen a fixed scheme gets it unconditionally; on "auto" the
                same rules ride on the phone's own preference. */
@@ -195,7 +225,7 @@
                 .deal__cta { background: #27272a; color: #fafafa; border-color: #52525b; }
                 .deal--plain .deal__cta { background: var(--brand); color: var(--on-brand); }
                 .deal__cta:hover { background: var(--brand); color: var(--on-brand); }
-                .portal__sub, .deal__meta, .chosen__meta { color: #a1a1aa; }
+                .portal__sub, .deal__meta, .chosen__meta, .recover__hint { color: #a1a1aa; }
                 .field__label { color: #d4d4d8; }
                 .field__input { background: #18181b; border-color: #52525b; color: #fafafa; }
                 .field__input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgb(var(--brand-channels) / .3); }
