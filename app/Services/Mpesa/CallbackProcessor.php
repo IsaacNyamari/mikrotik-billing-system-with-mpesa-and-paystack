@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Services\RouterOs\HotspotUserProvisioner;
 use App\Support\Audit\AuditLogger;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -189,6 +190,33 @@ class CallbackProcessor
     public function grantAccess(Payment $payment): Payment
     {
         if ($payment->hotspot_user_id !== null || $payment->plan_id === null || $payment->router_id === null) {
+            return $payment;
+        }
+
+        // A webhook and the portal's own poll land on the same payment within the same second
+        // routinely. The lock keeps them in single file so the second one sees the first one's
+        // work; the provisioner is idempotent as well, because a lock held on one web server
+        // is not a promise about the next.
+        $lock = Cache::lock('payments:grant:'.$payment->id, 30);
+
+        if (! $lock->get()) {
+            return $payment;
+        }
+
+        try {
+            return $this->issueAccess($payment);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    protected function issueAccess(Payment $payment): Payment
+    {
+        // Re-read behind the lock: whoever went first may have issued the access already, and
+        // the copy in hand was loaded before they did.
+        $payment->refresh();
+
+        if ($payment->hotspot_user_id !== null) {
             return $payment;
         }
 

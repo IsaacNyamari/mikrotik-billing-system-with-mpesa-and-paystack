@@ -10,6 +10,8 @@ use App\Models\Router;
 use App\Services\RouterOs\Exceptions\RouterOsCommandException;
 use App\Support\Audit\AuditLogger;
 use App\Support\Tenancy\Facades\Tenancy;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Throwable;
@@ -36,6 +38,13 @@ class HotspotUserProvisioner
      * The record is created first and separately from the push, so a router that is briefly
      * unreachable leaves a customer who has paid with a recoverable row rather than nothing.
      *
+     * **One reference is one package, however many times this is called.** A provider's webhook
+     * and the portal's own polling routinely reach the same conclusion within the same second,
+     * and both then ask for the access that payment bought. Guarding on the payment's
+     * `hotspot_user_id` is not enough: both read it before either has written. Until this was
+     * made idempotent here, the loser of that race hit the unique index and the customer — who
+     * had paid a moment earlier — was shown a server error.
+     *
      * @param  array<string, mixed>  $attributes
      */
     public function issue(Plan $plan, Router $router, string $reference, array $attributes = []): HotspotUser
@@ -46,26 +55,66 @@ class HotspotUserProvisioner
             );
         }
 
-        $user = DB::transaction(function () use ($plan, $router, $reference, $attributes): HotspotUser {
-            $user = new HotspotUser(array_merge([
-                'plan_id' => $plan->id,
-                'router_id' => $router->id,
-                // Username and password are deliberately the same value.
-                'username' => $reference,
-                'password' => $reference,
-                'reference' => $reference,
-                'amount' => $plan->price,
-                'limit_uptime_seconds' => $plan->validitySeconds(),
-                'limit_bytes' => $plan->dataCapBytes(),
-                'expires_at' => now()->addSeconds($plan->validitySeconds()),
-            ], $attributes));
-
-            $user->save();
-
-            return $user;
-        });
+        $user = $this->record($plan, $router, $reference, $attributes);
 
         return $this->provision($user);
+    }
+
+    /**
+     * The purchase row for this reference, creating it only if nobody else already has.
+     *
+     * Checked first and caught as well. The check answers the ordinary case — a repeat callback
+     * arriving seconds later — without paying for a failed insert, and the catch answers the
+     * genuine race, where two requests both looked before either wrote. Only the database can
+     * settle that one, and it does: the unique index on (router, username) is the arbiter, and
+     * the loser reads back what the winner created rather than failing.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    protected function record(Plan $plan, Router $router, string $reference, array $attributes): HotspotUser
+    {
+        if (($existing = $this->purchased($router, $reference)->first()) !== null) {
+            return $existing;
+        }
+
+        try {
+            return DB::transaction(function () use ($plan, $router, $reference, $attributes): HotspotUser {
+                $user = new HotspotUser(array_merge([
+                    'plan_id' => $plan->id,
+                    'router_id' => $router->id,
+                    // Username and password are deliberately the same value.
+                    'username' => $reference,
+                    'password' => $reference,
+                    'reference' => $reference,
+                    'amount' => $plan->price,
+                    'limit_uptime_seconds' => $plan->validitySeconds(),
+                    'limit_bytes' => $plan->dataCapBytes(),
+                    'expires_at' => now()->addSeconds($plan->validitySeconds()),
+                ], $attributes));
+
+                $user->save();
+
+                return $user;
+            });
+        } catch (UniqueConstraintViolationException $e) {
+            // Somebody else got there between the look and the insert. Their row is the one this
+            // customer has, so it is read back rather than treated as a failure — and if there
+            // is nothing to read, some other constraint rejected this and the original is
+            // rethrown rather than swallowed.
+            return $this->purchased($router, $reference)->firstOr(fn () => throw $e);
+        }
+    }
+
+    /**
+     * The purchase this reference names on this device, if it has been recorded.
+     *
+     * @return Builder<HotspotUser>
+     */
+    protected function purchased(Router $router, string $reference)
+    {
+        return HotspotUser::query()
+            ->where('router_id', $router->id)
+            ->where('username', $reference);
     }
 
     /**
@@ -83,7 +132,9 @@ class HotspotUserProvisioner
             $plan = $user->plan;
 
             // The plan's profile has to exist on the device before a user can reference it.
-            $pairing = $this->profiles->sync($plan, $router);
+            // ensure() rather than sync(): a customer who has just paid should not wait for a
+            // profile to be rewritten that nothing has changed since the last sale.
+            $pairing = $this->profiles->ensure($plan, $router);
 
             if (! $pairing->isSynced()) {
                 throw new RouterOsCommandException(sprintf(
