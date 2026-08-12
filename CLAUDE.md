@@ -516,8 +516,13 @@ database and user, and its own Redis prefix and database numbers, and it changes
   scheduler is not optional: expiry, `payments:reconcile` and router health all ride on it.
 - **`APP_TIMEZONE=Africa/Nairobi`** in production, UTC locally and in tests. A payment stamped
   three hours off is one an operator cannot reconcile against an M-PESA statement.
-- `php artisan platform:admin` creates the super admin, interactively. The platform deliberately
-  seeds no account: a seeded admin is one with a password somebody wrote down.
+- `php artisan platform:admin` creates the super admin, interactively — it asks for the password
+  rather than knowing it.
+- **`DatabaseSeeder` does not honour that.** It creates `admin@isp.solforbs.com` with the
+  password `password` and `is_super_admin = true`, *before* its `app()->isLocal()` guard, so the
+  account is seeded in every environment. Production has never had it only because
+  `release.sh` runs `migrate --force` with no `--seed` — which is a convention holding the door
+  shut, not a lock. Anyone running `migrate --seed` on the server opens it.
 - Certificates come from certbot `certonly --webroot` against `/var/www/html`, so renewal never
   rewrites the server block.
 
