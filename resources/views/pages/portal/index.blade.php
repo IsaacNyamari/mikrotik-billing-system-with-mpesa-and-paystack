@@ -123,6 +123,29 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             ->get();
     }
 
+    /**
+     * Where the customer's credentials are sent to sign them in.
+     *
+     * The HotSpot supplies `link-login-only` when it redirects, and that is the right answer
+     * when it is there. But a customer who reached this page any other way — a bookmark, a
+     * shared link, a redirect the phone's captive-portal helper swallowed — would otherwise be
+     * shown a code and no way to use it, having already paid.
+     *
+     * The router's own gateway address is known here regardless, so the login URL is rebuilt
+     * from it rather than left to a query parameter that may not have survived the trip.
+     */
+    #[Computed]
+    public function signInUrl(): ?string
+    {
+        if ($this->loginUrl !== '') {
+            return $this->loginUrl;
+        }
+
+        $gateway = $this->router->setupOptions()['hotspot_gateway'] ?? null;
+
+        return filter_var($gateway, FILTER_VALIDATE_IP) === false ? null : 'http://'.$gateway.'/login';
+    }
+
     #[Computed]
     public function payment(): ?Payment
     {
@@ -324,7 +347,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             @endif
         </div>
 
-        @if ($loginUrl !== '')
+        @if ($this->signInUrl)
             {{-- Posted straight to the MikroTik, which is what actually lets them online. The
                  HotSpot profile accepts http-pap, so the credentials go as plain fields.
 
@@ -346,7 +369,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                  cellular network — the router is unreachable and the automatic hop fails
                  silently. Something they can see and tap after rejoining the wifi is the
                  difference between a working purchase and a refund. --}}
-            @php($signIn = $loginUrl.'?username='.rawurlencode($access->username).'&password='.rawurlencode($access->password))
+            @php($signIn = $this->signInUrl.'?username='.rawurlencode($access->username).'&password='.rawurlencode($access->password))
 
             <a href="{{ $signIn }}" class="btn" id="hotspot-login" rel="noreferrer">
                 {{ __('Connect now') }}

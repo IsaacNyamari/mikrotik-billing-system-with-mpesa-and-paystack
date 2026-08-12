@@ -185,6 +185,37 @@ class PortalLayoutTest extends TestCase
     }
 
     #[Test]
+    public function a_customer_who_arrived_without_the_hotspot_redirect_can_still_connect(): void
+    {
+        // A bookmark, a shared link, or a captive-portal helper that swallowed the parameters.
+        // Showing somebody a code and no way to use it, after they have paid, is the worst
+        // outcome this page has.
+        $this->router->setup_options = ['hotspot_gateway' => '10.10.10.1'];
+        $this->router->save();
+
+        $component = Livewire::test('pages::portal.index', ['portalKey' => $this->router->portal_key])
+            ->call('choose', $this->plan->id)
+            ->set('phone', '0712345678')
+            ->call('pay');
+
+        $payment = Payment::query()->sole();
+
+        $this->postJson(route('webhooks.mpesa', ['token' => MpesaConfiguration::query()->sole()->callback_token]), [
+            'Body' => ['stkCallback' => [
+                'CheckoutRequestID' => $payment->checkout_request_id,
+                'ResultCode' => 0,
+                'CallbackMetadata' => ['Item' => [['Name' => 'MpesaReceiptNumber', 'Value' => 'GDGDAHXS']]],
+            ]],
+        ]);
+
+        // Rebuilt from the router's own gateway rather than a query parameter that never
+        // arrived.
+        $component->call('checkPayment')
+            ->assertSee('http://10.10.10.1/login?username=GDGDAHXS', escape: false)
+            ->assertSee('Connect now');
+    }
+
+    #[Test]
     public function an_isp_can_reword_and_relayout_the_whole_thing(): void
     {
         PortalSetting::query()->create([
