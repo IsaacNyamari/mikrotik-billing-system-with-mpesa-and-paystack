@@ -70,5 +70,13 @@ systemctl restart php8.3-fpm 2>/dev/null || systemctl restart php-fpm 2>/dev/nul
 systemctl restart isp-queue.service 2>/dev/null || true
 systemctl restart isp-scheduler.service 2>/dev/null || true
 
+# Restarting the scheduler kills whatever its background tasks were in the middle of, and a
+# task that is killed never releases its overlap lock. Those locks then block every later run
+# until they expire, so a deploy is otherwise a way to silently stop expiring packages and
+# chasing payments — which is exactly what it did, unnoticed, until somebody read the log.
+#
+# Safe to do here: the tasks it unblocks are all written to be run again.
+$PHP artisan schedule:clear-cache 2>/dev/null || true
+
 echo "==> Done"
 $PHP artisan about --only=environment

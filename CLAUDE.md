@@ -490,6 +490,24 @@ The code itself is always shown, because it is theirs and the SMS has it anyway.
 
 The scheduler must actually be running: `php artisan schedule:work`.
 
+**Every overlap guard carries an explicit expiry, and the number is load-bearing.**
+`withoutOverlapping()` takes a lock before a task and releases it after; a task that is *killed*
+rather than finished — a deploy restarting the scheduler, an OOM, a reboot — never reaches the
+release, and the lock sits there for the default **24 hours**. The scheduler then reports "no
+scheduled commands are ready to run" every minute while packages never expire and payments are
+never chased. Nothing errors, nothing alerts; the work simply stops.
+
+Seen in production on 2026-08-13: three stuck locks, all three per-minute tasks skipped for
+about half an hour after a deploy restarted the scheduler mid-run. Two defences now:
+
+- expiries of a few multiples of each task's interval (10 / 10 / 15 / 60 minutes), so a killed
+  run heals itself;
+- `schedule:clear-cache` in `deploy/release.sh` after the restart, so a deploy cannot wedge it
+  at all. Safe because every scheduled task here is written to be run again.
+
+`php artisan schedule:list` is the diagnosis: a task showing **"Has Mutex"** when it is not
+currently running is a stuck lock.
+
 ### Production (`isp.solforbs.com`)
 
 Ubuntu 24.04 at `178.162.241.172`, **shared** with `sms`, `panel`, `mail` and the apex site.
