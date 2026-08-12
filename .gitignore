@@ -22,3 +22,6 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+# Local scratch, never part of the application (also excluded from deploys).
+/portal_check.html

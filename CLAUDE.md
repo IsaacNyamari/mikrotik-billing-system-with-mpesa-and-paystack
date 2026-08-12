@@ -106,6 +106,29 @@ the service account, never to the customer.
   Phase 7 that action is also where RADIUS is refreshed and live sessions are dropped.
 - A blocked customer takes all of their services offline regardless of each service's own status.
 
+### HotSpot buyers are shown beside accounts, not turned into them
+
+A walk-in never becomes a `Customer` — they gave a phone number, and one `Customer` row per
+hourly purchase would bury the handful of accounts the list exists to manage. But an ISP selling
+only HotSpot packages then has **no `Customer` rows at all**, and opens Customers to a blank
+table while people sit on their wifi having paid (production, 2026-08-13: 0 customers, 4 settled
+payments). True, and useless.
+
+So the screen carries two lists behind a tab. **Accounts** is unchanged. **HotSpot buyers**
+groups `hotspot_users` by phone — packages bought, spent, last bought, whether anything of theirs
+is live — with a modal listing that number's purchases and their codes, which is the conversation
+that starts "I paid earlier". `activeTab()` opens on buyers when there are no accounts and there
+are buyers: the answer being one tab away is the whole of the original complaint.
+
+Two details that are not cosmetic:
+
+- **"Live" is computed from `expires_at`, not from `status`.** The sweeper runs once a minute, so
+  a spent package reads `active` for up to a minute after it stopped working. The clock is the
+  authority.
+- Spend comes from `hotspot_users.amount`, which `grantAccess()` overwrites with the sum the
+  provider reported as actually paid — so this agrees with Earnings rather than with the price
+  list.
+
 ## Authorization
 
 - `App\Support\Authorization\Permissions` is the permission catalogue and the single source of
@@ -150,6 +173,38 @@ through `App\Services\RouterOs`:
 - Timeouts are deliberately short (`config/routeros.php`): provisioning runs while an operator or
   a captive-portal customer waits.
 
+### Latency, not bandwidth
+
+What a customer experiences as a slow portal is never throughput — these commands are tens of
+bytes. It is the delay before the first one gets through, and four things remove it:
+
+- **`PooledRouterOsConnector`** is the bound `RouterOsConnector` (`scoped`, so it is discarded
+  between jobs). One connection per router for the life of a request: issuing a HotSpot login
+  used to pay for two TCP handshakes and two RouterOS logins, because the profile synchroniser
+  and the user provisioner each opened their own. `PooledRouterOsConnection::disconnect()` is a
+  no-op — callers still close, and are still right to — while a transport failure marks the
+  connection broken so the pool reopens rather than handing on a dead socket. A
+  `RouterOsCommandException` does **not** break it: that is the device disagreeing, not the
+  network failing. Tests bind `FakeRouterOsConnector` with `instance()` and bypass the pool.
+- **`PlanProfileSynchroniser::ensure()`** on the customer-waiting path instead of `sync()`. The
+  profile is re-pushed only when the plan has changed since the last push; somebody buying the
+  same bundle as the last twenty customers waits for their own login and nothing else.
+- **`keepalive_seconds` is 15**, inside both the usual ~30s NAT timeout and WireGuard's 120s
+  rekey, so the tunnel is already up when somebody pays rather than being rebuilt while they
+  wait. ~6 MB per router per month.
+- **`wireguard.mtu` is 1380**, under RouterOS's 1420 default. A PPPoE line or a 4G dongle makes
+  the default too big, and a path that swallows the ICMP reply turns that into a command that
+  *hangs* rather than one that fails — much the worst outcome. The script also exempts tunnel
+  traffic from mangle, so a queue tree an ISP adds later cannot put provisioning behind a
+  customer's download, and pings the server at the end rather than waiting for the first
+  keepalive.
+
+`connect_timeout` is 3s with `attempts` 2: short, because a router that is down is down now, but
+with a retry because a tunnel mid-handshake is not the same as an outage.
+
+**Routers already deployed keep the settings pasted into them.** Regenerating and re-pasting
+their setup script is what applies the new keepalive and MTU.
+
 Router API passwords are `encrypted` and `#[Hidden]`. Health fields and `status` are **not**
 mass-assignable — they are reported by the device, so the probe assigns them directly. `fill()`
 would silently drop them.
@@ -189,6 +244,19 @@ then pushes; a router that is briefly unreachable must not lose a customer who h
 and password are both the payment reference. `limit-uptime` and `limit-bytes-total` go on the
 **user**, not the profile — two people on the same plan each bought their own hour. Re-issuing the
 same reference updates rather than duplicating, because M-PESA delivers callbacks more than once.
+
+**One reference is one package, in the database and not only on the device.** The re-issue
+guard used to live solely in `provision()`, which asks the router whether it already has the
+user. Nothing asked whether *this* table already had the purchase. A Paystack webhook and the
+portal's own 3-second poll both reached `grantAccess()` inside the same second, both read
+`hotspot_user_id` as null because neither had written yet, and the loser hit
+`hotspot_users_router_id_username_unique` — a 500 for a customer who had paid ten shillings a
+moment earlier (production, 2026-08-13, receipt `UHDI92J1YN`). `issue()` now looks first and
+catches `UniqueConstraintViolationException` as well: the check answers a repeat callback
+cheaply, and the index arbitrates the genuine race, with the loser reading back the winner's
+row. `CallbackProcessor::grantAccess()` also takes a `payments:grant:{id}` lock and re-reads
+behind it — the lock keeps the ordinary case out of the race, and the idempotency covers what a
+lock on one web server cannot promise about the next.
 
 `remove()` reads usage off the device **before** deleting the row: once it is gone RouterOS has no
 memory of it, and that reading is the only evidence of what was consumed. The `hotspot_users`
@@ -363,10 +431,54 @@ ISP — a HotSpot's front page is the whole of what most customers ever see of t
   package this ISP withheld or never sold.
 - **Once paid, the credentials are posted to the router immediately, with nothing to press.**
   Asking someone who has just paid to confirm that they want what they bought is how people end
-  up stranded on a page. A manual button exists but stays hidden unless the automatic post has
-  not navigated away after four seconds.
+  up stranded on a page. The visible "Connect now" link stays regardless, for a phone that
+  drifted onto mobile data for the M-PESA prompt.
+- **That navigation is driven by a dispatched event, never by a `<script>` in the panel.** The
+  success panel arrives through a `wire:poll` update, which *patches* the DOM — and Livewire
+  does not execute a script tag introduced by a patch. So the automatic hop fired only on a
+  full page load, which is precisely what a customer sitting on the payment screen is not
+  doing: they watched a page carrying their code and nothing happened, indistinguishable from
+  the purchase failing. `announceConnection()` dispatches `portal-connect`; an `@script` block
+  registers the listener when the component first initialises, long before anyone has paid.
+  `signInLink()` builds the URL once, for both the anchor and the event — two constructions of
+  one URL is how those quietly stop agreeing.
 - Paid but no login yet means the router was unreachable when the money landed. The portal keeps
   polling and retries issuing it rather than making anyone pay twice.
+
+### Paid, and still not online
+
+A **form, not a link that opens one** (`resources/views/portal/recover.blade.php`, included under
+the packages and again on the failure screen). Whoever needs it has no internet and has already
+paid; making them find and tap something before they can start typing is one obstacle too many
+at the worst possible moment.
+
+Money moves and then something goes wrong between there and the customer being connected: the
+router was unreachable, the phone hopped to mobile data for the M-PESA prompt and never came
+back, the tab was closed, the package was bought at the counter. In every one of them the
+customer holds a confirmation SMS and has no idea which happened — nor should they need one.
+So the portal's `recover()` asks for **the code and nothing else**, and tries each cause in turn:
+
+- a `HotspotUser` already issued under that code — re-pushed if it is not live on the device;
+- a `Payment` settled but never provisioned — `grantAccess()` runs now;
+- a `Payment` still pending — `PaymentReconciler` asks the provider on the spot.
+
+A findable payment that is not access reports **its own outcome** rather than "code not found":
+telling somebody whose prompt was cancelled to check for a typo sends them hunting for one that
+is not there. Expired packages are never resurrected.
+
+Scoped to `router_id`, not merely to the tenant. A code bought at another branch would be found
+and would then fail to let them on, which is worse than saying no.
+
+The code is normalised (trim, uppercase) **before** validation — a page that answers a copied SMS
+with a complaint about punctuation is arguing with a customer who has done nothing wrong.
+`RateLimiter` caps attempts per router per IP; ten-character codes are not guessable, but an
+unmetered lookup on a public page is still unmetered work.
+
+`#[Computed] access()` resolves from either `accessId` (recovered) or the payment's
+`hotspotUser`, so one success screen serves both — from where the customer stands they are the
+same situation. **"Connect now" is withheld until the access is `Active`**: sending somebody to a
+login the router has never heard of hands them a refusal for something that is about to work.
+The code itself is always shown, because it is theirs and the SMS has it anyway.
 
 ### Scheduled work (`routes/console.php`)
 
@@ -390,6 +502,16 @@ database and user, and its own Redis prefix and database numbers, and it changes
 - `deploy/push.sh` sends the working tree from the development machine and runs
   `deploy/release.sh` on the server. There is no git remote, so what is on that machine is what
   runs. `.env` is never transferred.
+- **`deploy/verify.sh` proves it.** With no git remote, a comparison is the only evidence that
+  the server is running this machine's code — and it is worth having because tar overwrites and
+  adds but never *deletes*: a file removed here stays on the server forever unless somebody
+  looks. It exits non-zero on any drift. (It found exactly that: `storage/framework/testing`,
+  this machine's Livewire test scratch, had been riding along on every deploy.)
+- `deploy/excludes.txt` is the single list of what is not source, read by both scripts — what is
+  sent and what is checked must agree, or "identical" means nothing. `bootstrap/cache` is on it
+  deliberately: the server runs `composer install --no-dev`, so shipping ours would put Pint,
+  Larastan and PHPUnit service providers into production and trust the release script to
+  overwrite them.
 - `isp-scheduler.service` and `isp-queue.service` are systemd units, both `Restart=always`. The
   scheduler is not optional: expiry, `payments:reconcile` and router health all ride on it.
 - **`APP_TIMEZONE=Africa/Nairobi`** in production, UTC locally and in tests. A payment stamped
@@ -495,6 +617,22 @@ in `mpesa_configurations` — there is one set for the whole installation, and i
 ISPs rather than for them. It is handed to the proven Daraja gateway as an unsaved
 `MpesaConfiguration`, and it has its own callback route and token because the tenant callback
 looks payments up in a table this money never touches.
+
+## The manual
+
+`resources/views/pages/docs/index.blade.php` with its chapters in `resources/views/docs/sections/`
+— outside the `pages::` namespace, so Livewire never tries to treat a partial as a component.
+Linked from the bottom of the sidebar, where the starter kit's links to Laravel's own docs used
+to be.
+
+- **In the application, not on a documentation site.** Most of it is read while a router is down,
+  which is exactly when leaving here is least useful.
+- **Outside `subscribed`**, like the billing screen: half of it is read by somebody trying to put
+  a lapsed account back in order.
+- The chapter id is interpolated into a view name and arrives from the query string, so the
+  include uses `current()['id']` — which falls back to the first chapter — and never `$section`.
+- Prices come from `config/platform.php`, so what the manual quotes and what the system bills
+  cannot drift apart.
 
 ## The public site
 

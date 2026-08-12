@@ -35,7 +35,12 @@ fi
 npm run build
 
 echo "==> Storage link"
-$PHP artisan storage:link || true
+# Asked for only when it is missing. `storage:link` prints a red ERROR when the link is already
+# there, which is the normal state on every deploy after the first — and a release that shouts
+# ERROR at a healthy step teaches whoever is watching to stop reading them.
+if [ ! -e public/storage ]; then
+    $PHP artisan storage:link
+fi
 
 echo "==> Database"
 # --force because there is no terminal to confirm at. Migrations are additive; nothing

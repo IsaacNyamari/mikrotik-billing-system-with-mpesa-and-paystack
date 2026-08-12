@@ -25,21 +25,10 @@ SSH=(ssh -i "$KEY" -o BatchMode=yes)
 
 echo "==> Sending source to $HOST:$APP_DIR"
 
-tar czf - \
-    --exclude=./.git \
-    --exclude=./.env \
-    --exclude=./node_modules \
-    --exclude=./vendor \
-    --exclude=./public/build \
-    --exclude=./public/hot \
-    --exclude=./public/storage \
-    --exclude=./storage/app \
-    --exclude=./storage/logs \
-    --exclude=./storage/framework/cache \
-    --exclude=./storage/framework/sessions \
-    --exclude=./storage/framework/views \
-    --exclude=./.phpunit.result.cache \
-    --exclude=./portal_check.html \
+# The exclusion list lives in its own file so deploy/verify.sh can read the same one. What is
+# sent and what is checked afterwards must agree on what counts as source, or "identical" means
+# nothing.
+tar czf - --exclude-from=deploy/excludes.txt \
     . | "${SSH[@]}" "$HOST" "cat > /tmp/isp-src.tgz"
 
 echo "==> Releasing"
