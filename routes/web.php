@@ -51,9 +51,12 @@ Route::post('webhooks/platform/paystack', PlatformPaystackWebhookController::cla
     ->name('webhooks.platform-paystack');
 
 // Reachable however much an ISP owes — locking someone out of the page where they pay turns
-// every late payment into a phone call.
+// every late payment into a phone call. The manual is here for the same reason: half of what
+// it explains is read by somebody trying to get an account back in order.
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('billing', 'pages::billing.index')->name('billing.index');
+
+    Route::livewire('docs', 'pages::docs.index')->name('docs.index');
 });
 
 Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {

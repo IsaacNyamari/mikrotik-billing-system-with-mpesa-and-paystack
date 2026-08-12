@@ -106,12 +106,12 @@
 
             <flux:spacer />
 
+            {{-- The manual, pinned to the bottom where a help link is looked for. It is a page
+                 of this application rather than a link off to somebody else's website: most of
+                 it is read while a router is down, which is exactly when leaving here is least
+                 useful. --}}
             <flux:sidebar.nav>
-                <flux:sidebar.item icon="folder-git-2" href="https://github.com/laravel/livewire-starter-kit" target="_blank">
-                    {{ __('Repository') }}
-                </flux:sidebar.item>
-
-                <flux:sidebar.item icon="book-open-text" href="https://laravel.com/docs/starter-kits#livewire" target="_blank">
+                <flux:sidebar.item icon="book-open-text" :href="route('docs.index')" :current="request()->routeIs('docs.*')" wire:navigate>
                     {{ __('Documentation') }}
                 </flux:sidebar.item>
             </flux:sidebar.nav>
