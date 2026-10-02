@@ -178,23 +178,54 @@ purchase on.
 
 ## Deployment
 
-There is no git remote on the server. `deploy/push.sh` sends the working tree over SSH and runs
-`deploy/release.sh` there, so **what is on the development machine is what runs**.
+The server pulls a commit from GitHub, so **what is running is always something you can look
+up**.
+
+### A server that does not exist yet
+
+Run once, as root. It is idempotent, so a run that stops halfway is fixed by running it again.
+
+```bash
+bash deploy/provision.sh
+```
+
+It installs the packages, creates the database and its user, generates a read-only deploy key
+for the private repository (and stops to tell you to add it), clones, writes `.env`, brings up
+the WireGuard interface, installs nginx and the systemd units, and runs the first release.
+
+It deliberately stops short of the certificate, which cannot be issued before DNS resolves:
+
+```bash
+bash deploy/certificate.sh
+```
+
+Then create an administrator. It asks for the password rather than knowing one:
+
+```bash
+php artisan platform:admin
+```
+
+### Every deploy after that
 
 ```bash
 ./deploy/push.sh
+```
+
+Deploy something other than `main` — a tag, or an older commit to roll back to:
+
+```bash
+REF=v1.4.0 ./deploy/push.sh
 ```
 
 ```bash
 ./deploy/verify.sh
 ```
 
-`verify.sh` hashes both sides and reports drift. It is worth running because `tar` overwrites and
-adds but never deletes — a file removed locally stays on the server forever unless somebody
-looks. `deploy/excludes.txt` is the single list of what is not source, read by both scripts.
+`verify.sh` reports the running commit, whether this repository has it, whether anything was
+edited on the server, and whether the services are up.
 
-A commit is not a deploy, and a deploy can carry uncommitted work. `git status` and
-`./deploy/verify.sh` answer different questions.
+Two refusals are deliberate: `push.sh` will not deploy a commit you have not pushed, and
+`release.sh` will not run over a checkout with uncommitted changes on it.
 
 ## Project layout
 

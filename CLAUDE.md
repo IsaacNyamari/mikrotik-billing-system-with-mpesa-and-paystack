@@ -517,19 +517,33 @@ database and user, and its own Redis prefix and database numbers, and it changes
 - `/var/www/isp`, served by nginx over the shared `php8.3-fpm.sock` pool. Code is `root:www-data`
   and read-only to the web user; only `storage` and `bootstrap/cache` are writable by it, and
   `.env` is `640 root:www-data`.
-- `deploy/push.sh` sends the working tree from the development machine and runs
-  `deploy/release.sh` on the server. There is no git remote, so what is on that machine is what
-  runs. `.env` is never transferred.
-- **`deploy/verify.sh` proves it.** With no git remote, a comparison is the only evidence that
-  the server is running this machine's code — and it is worth having because tar overwrites and
-  adds but never *deletes*: a file removed here stays on the server forever unless somebody
-  looks. It exits non-zero on any drift. (It found exactly that: `storage/framework/testing`,
-  this machine's Livewire test scratch, had been riding along on every deploy.)
-- `deploy/excludes.txt` is the single list of what is not source, read by both scripts — what is
-  sent and what is checked must agree, or "identical" means nothing. `bootstrap/cache` is on it
-  deliberately: the server runs `composer install --no-dev`, so shipping ours would put Pint,
-  Larastan and PHPUnit service providers into production and trust the release script to
-  overwrite them.
+**The server pulls a commit from GitHub.** It used to receive a tar of somebody's working
+tree, and the trouble with that was not that it failed — it worked for months — but that what
+ran could not be traced to anything. It was one laptop at one moment, including whatever was
+uncommitted, and answering "what is live" meant hashing every file on both sides.
+
+- `deploy/provision.sh` takes a bare Ubuntu box to a working one: packages, database, deploy
+  key, clone, `.env`, WireGuard interface, nginx, systemd units, first release. Idempotent, so
+  a run that stopped halfway is fixed by running it again. It stops short of the certificate
+  (needs DNS) and the first administrator (asks for a password rather than knowing one).
+- `deploy/certificate.sh` issues the certificate once DNS resolves, then swaps nginx onto the
+  committed server block. It checks the name resolves *first*: Let's Encrypt rate-limits
+  failures, and a name that does not resolve fails every time. `--webroot`, never `--nginx` —
+  the nginx plugin rewrites the server block, and that block is committed, so a renewal three
+  months from now would be silently undone by the next release.
+- `deploy/release.sh` runs on the server: fetch, check out `REF` (default `main`, but a tag or
+  an older commit for a rollback), then build. It **refuses to run if the checkout is dirty** —
+  local edits on a server are either an emergency somebody forgot to commit or a mistake, and
+  discarding them silently turns the first into the second.
+- `deploy/push.sh` is the entry point from the development machine. Its only real job is
+  refusing to deploy a commit that has not been pushed, which is the mistake people actually
+  make: commit, deploy, wonder why nothing changed.
+- `deploy/verify.sh` answers "what is running" with a commit, whether that commit is one this
+  repository has, whether anything was edited on the server, and whether the services are up.
+
+`.env` is written once by `provision.sh` and never touched again. It is the one file on that
+server this repository does not own, and a release that rewrote it would take the database
+password with it.
 - `isp-scheduler.service` and `isp-queue.service` are systemd units, both `Restart=always`. The
   scheduler is not optional: expiry, `payments:reconcile` and router health all ride on it.
 - **`APP_TIMEZONE=Africa/Nairobi`** in production, UTC locally and in tests. A payment stamped
@@ -590,6 +604,35 @@ the only channel that always works, so what it contains has to be right the firs
 On the production box: `wg0` at `10.8.0.1/24`, `wg-quick@wg0` enabled, UDP 51820 open in ufw,
 and `WIREGUARD_PUBLIC_KEY` in the app's environment. **Management only** — no forwarding and no
 NAT, so the tunnel never becomes an ISP's accidental transit provider.
+
+### The same arrangement makes a bench router unreachable
+
+Both of the things that make this work in a shop break it on a desk, and neither announces
+itself. Two settings exist for that, both off by default, and `deploy/release.sh` **refuses to
+release** if either is set on a server — the realistic way they get there is somebody copying
+`.env` from a laptop.
+
+- **`wireguard.manage_over_tunnel`** (default true). Generating a setup script repoints the
+  router record at its tunnel address, because from then on that is where it answers. On a
+  machine with no WireGuard server, `10.8.0.x` is an address to nowhere — and this runs on
+  every *render* of the setup page rather than on a button, so a developer who merely looked at
+  the script found their bench router timing out against a host they never typed.
+- **`wireguard.local_api_subnet`** (default empty). The script binds the API to the management
+  subnet and drops it everywhere else, so a laptop on the LAN is dropped too — which presents
+  as a *timeout* rather than a refusal, because the packets are dropped rather than rejected.
+  Setting this lets one more subnet in, in all three places that must agree: the `/ip/service`
+  binding, the user's `address=`, and the firewall. Granting one and forgetting another gives a
+  device that refuses differently each time and looks broken rather than closed.
+
+The value is written straight into a firewall rule, so anything that is not plainly an IPv4
+address or range is **refused rather than sanitised** — a typo quietly becoming `0.0.0.0/0`
+would open the API to everyone on the strength of a misplaced character. The script also emits
+`remove [find comment="platform-api-allow-local"]` unconditionally, so regenerating in
+production revokes a bench allowance granted earlier.
+
+Both are pinned to their production defaults in `phpunit.xml`. A laptop that set them was
+quietly running a different suite from CI, which is how people learn to distrust the tests
+rather than the setting.
 
 ## The platform's own business
 
