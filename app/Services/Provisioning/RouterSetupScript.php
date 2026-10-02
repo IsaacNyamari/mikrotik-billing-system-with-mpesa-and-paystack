@@ -70,6 +70,7 @@ class RouterSetupScript
 
         $serverAddress = (string) config('wireguard.server_address');
         $subnet = (string) config('wireguard.subnet');
+        $localSubnet = $this->subnet($options['local_api_subnet'] ?? config('wireguard.local_api_subnet'));
         $portalHost = (string) (parse_url((string) config('app.url'), PHP_URL_HOST) ?: 'localhost');
 
         // A fresh API password every time a script is generated. The old one stops working
@@ -105,10 +106,20 @@ class RouterSetupScript
         $router->api_username = $apiUser;
         $router->api_password = $apiPassword;
         // From here on the platform talks to this device down the tunnel, not over the
-        // internet. This is the line that makes the whole arrangement work.
-        $router->host = (string) $router->wg_address;
-        $router->api_port = 8728;
-        $router->uses_tls = false;
+        // internet. This is the line that makes the whole arrangement work — where there is a
+        // tunnel to talk down.
+        //
+        // On a machine with no WireGuard server there is not, and 10.8.0.x is an address to
+        // nowhere. Worse, this runs on every render of the setup page rather than on a button:
+        // a developer who merely *looked* at the script found their bench router had stopped
+        // answering, with an error naming a host they never typed. Leaving the address alone is
+        // what keeps "proven locally first" true.
+        if (config('wireguard.manage_over_tunnel') === true) {
+            $router->host = (string) $router->wg_address;
+            $router->api_port = 8728;
+            $router->uses_tls = false;
+        }
+
         $router->save();
 
         // Wiping reboots the device, which throws away whatever is still being pasted. So the
@@ -123,7 +134,7 @@ class RouterSetupScript
 
         $lines[] = $this->banner($router, $portalHost);
         $lines[] = $this->tunnelSection($router, $wgInterface, $subnet);
-        $lines[] = $this->apiSection($router, $wgInterface, $apiUser, $apiGroup, $apiPassword, $serverAddress, $subnet);
+        $lines[] = $this->apiSection($router, $wgInterface, $apiUser, $apiGroup, $apiPassword, $serverAddress, $subnet, $localSubnet);
 
         if ($withHotspot) {
             $lines[] = $this->hotspotSection($router, $bridge, $lan, $pool, $hotspot, $network, $gateway, $poolStart, $poolEnd, $portalHost);
@@ -176,7 +187,7 @@ class RouterSetupScript
         $lines = [
             $this->resetPreamble($router, $wan),
             $this->tunnelSection($router, $wgInterface, $subnet),
-            $this->apiSection($router, $wgInterface, $apiUser, $apiGroup, (string) $router->api_password, $serverAddress, $subnet),
+            $this->apiSection($router, $wgInterface, $apiUser, $apiGroup, (string) $router->api_password, $serverAddress, $subnet, $this->subnet(config('wireguard.local_api_subnet'))),
         ];
 
         if ($withHotspot) {
@@ -606,7 +617,28 @@ class RouterSetupScript
         string $password,
         string $serverAddress,
         string $subnet,
+        string $localSubnet = '',
     ): string {
+        // Allowed in alongside the tunnel when a bench machine has to reach this device. The
+        // three places below must agree: the service decides which addresses it answers, the
+        // user decides where it may log in from, and the firewall decides what arrives at all.
+        // Granting one and forgetting another produces a device that refuses in a different
+        // way each time and looks broken rather than closed.
+        $addresses = $localSubnet === '' ? $subnet : $subnet.','.$localSubnet;
+
+        $localRule = $localSubnet === '' ? '' : <<<RULE
+
+
+        # Development allowance: this router is also reachable from {$localSubnet}.
+        # Generated because wireguard.local_api_subnet is set. It must not be set on a
+        # platform serving real ISPs — a router in a shop sits on somebody else's LAN, and
+        # whoever else is on that LAN is not us.
+        add chain=input protocol=tcp dst-port=8728 src-address={$localSubnet} \\
+            action=accept comment="platform-api-allow-local" place-before=0
+        RULE;
+
+        $localNote = $localSubnet === '' ? '' : "\n        # Also answers {$localSubnet}, for a machine on the same bench as this router.";
+
         return <<<SCRIPT
 
         # ---------------------------------------------------------------------
@@ -615,7 +647,7 @@ class RouterSetupScript
         # The service is bound to the management subnet and firewalled off
         # every other interface before it is enabled. An API reachable from the
         # internet is an admin service advertised to the world, and no amount
-        # of password strength makes that a good idea.
+        # of password strength makes that a good idea.{$localNote}
         # ---------------------------------------------------------------------
 
         # The user is removed before the group it belongs to, or RouterOS refuses the group.
@@ -634,18 +666,21 @@ class RouterSetupScript
 
         /user
         add name="{$user}" password="{$password}" group="{$group}" \\
-            address={$subnet} comment="Platform. Do not remove."
+            address={$addresses} comment="Platform. Do not remove."
 
         /ip/service
-        set api address={$subnet} port=8728 disabled=no
-        # Nothing here speaks api-ssl, and an unused open port is a liability.
+        set api address={$addresses} port=8728 disabled=no
+        # Nothing here speaks api-ssl, and an unused open port is a liability. It is also a
+        # port that answers a TCP connection and then fails the handshake when no certificate
+        # is assigned, which reads as a broken network rather than a disabled service.
         set api-ssl disabled=yes
 
         /ip/firewall/filter
         remove [find comment="platform-api-allow"]
+        remove [find comment="platform-api-allow-local"]
         remove [find comment="platform-api-drop"]
         add chain=input protocol=tcp dst-port=8728 src-address={$serverAddress} \\
-            action=accept comment="platform-api-allow" place-before=0
+            action=accept comment="platform-api-allow" place-before=0{$localRule}
         add chain=input protocol=tcp dst-port=8728 \\
             action=drop comment="platform-api-drop" place-before=1
         SCRIPT;
@@ -926,6 +961,35 @@ class RouterSetupScript
         // hostname into a rule that needs an address — which RouterOS rejects — fall back to
         // the whole internet on that comment, which the dst-host rule above already narrows.
         return filter_var($address, FILTER_VALIDATE_IP) !== false ? $address : '0.0.0.0/0';
+    }
+
+    /**
+     * An address or CIDR range RouterOS will accept, or nothing at all.
+     *
+     * This is written straight into a firewall rule and a service binding, so anything that is
+     * not plainly an IPv4 address or range is refused rather than sanitised into something
+     * subtly different. A typo that silently became 0.0.0.0/0 would open the API to everyone
+     * on the strength of a misplaced character.
+     */
+    protected function subnet(mixed $value): string
+    {
+        $candidate = trim((string) $value);
+
+        if ($candidate === '') {
+            return '';
+        }
+
+        [$address, $bits] = array_pad(explode('/', $candidate, 2), 2, null);
+
+        if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            return '';
+        }
+
+        if ($bits === null) {
+            return $address;
+        }
+
+        return preg_match('/^\d{1,2}$/', $bits) === 1 && (int) $bits <= 32 ? $address.'/'.$bits : '';
     }
 
     protected function maskBits(string $cidr): string

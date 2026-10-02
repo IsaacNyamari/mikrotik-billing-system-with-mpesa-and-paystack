@@ -74,6 +74,53 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Reaching a Router From the Bench
+    |--------------------------------------------------------------------------
+    |
+    | The setup script binds the API to the management subnet and drops it
+    | everywhere else, which is right for a router in a shop and wrong for the
+    | one on the desk here. A developer's machine is not 10.8.0.1, so pasting
+    | that script onto a test device locks this machine out of it — the API
+    | stops answering and a connection attempt times out rather than being
+    | refused, because the packets are dropped rather than rejected.
+    |
+    | That contradicts the rule this project is built on: every workflow is
+    | proven locally before it is deployed. So a second subnet may be allowed
+    | in alongside the tunnel.
+    |
+    | Empty by default, and it must stay empty in production. It is a LAN, not
+    | the internet, so it does not breach "never expose the API publicly" — but
+    | an allowance nobody remembers granting is still an allowance.
+    |
+    */
+
+    'local_api_subnet' => env('WIREGUARD_LOCAL_API_SUBNET', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Addressing a Router After Its Script Is Generated
+    |--------------------------------------------------------------------------
+    |
+    | Generating a setup script repoints the router record at its tunnel
+    | address, because from then on the platform talks to the device down the
+    | tunnel rather than over the LAN. That is the line the whole arrangement
+    | rests on, and on the production box it is right.
+    |
+    | On a development machine there is no WireGuard server, so 10.8.0.x is an
+    | address to nowhere — and the rewrite happens merely by opening the setup
+    | page, which regenerates the script on every render. A router that was
+    | reachable on the bench a moment ago then times out, and the error names a
+    | host nobody typed.
+    |
+    | So this says whether this installation actually has a tunnel to reach
+    | routers through. It is true in production and must be false on a laptop.
+    |
+    */
+
+    'manage_over_tunnel' => (bool) env('WIREGUARD_MANAGE_OVER_TUNNEL', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | What the Generated Script Sets Up
     |--------------------------------------------------------------------------
     |

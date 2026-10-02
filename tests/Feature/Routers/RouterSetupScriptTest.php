@@ -352,6 +352,93 @@ class RouterSetupScriptTest extends TestCase
             ->assertSuccessful();
     }
 
+    #[Test]
+    public function the_api_is_closed_to_everything_but_the_tunnel_by_default(): void
+    {
+        // The allowance below exists for a router on a developer's desk. A platform serving
+        // real ISPs must never emit it: those routers sit on somebody else's LAN, and whoever
+        // else is on that LAN is not us.
+        config(['wireguard.local_api_subnet' => '']);
+
+        $script = $this->script();
+
+        $this->assertStringContainsString('set api address=10.8.0.0/24 port=8728', $script);
+
+        // The comment itself still appears, in the line that removes any allowance granted by
+        // an earlier run — regenerating without one has to revoke it. What must be absent is
+        // the rule that grants it.
+        $this->assertStringNotContainsString('action=accept comment="platform-api-allow-local"', $script);
+        $this->assertStringContainsString('remove [find comment="platform-api-allow-local"]', $script);
+    }
+
+    #[Test]
+    public function a_bench_machine_can_be_let_in_alongside_the_tunnel(): void
+    {
+        // Pasting the production script onto a test device locks this machine out of it: the
+        // API stops answering and the connection times out rather than being refused, because
+        // the packets are dropped. That contradicts proving every workflow locally first.
+        config(['wireguard.local_api_subnet' => '192.168.0.0/24']);
+
+        $script = $this->script();
+
+        // All three have to agree, or the device refuses in a different way each time and
+        // looks broken rather than closed.
+        $this->assertStringContainsString('set api address=10.8.0.0/24,192.168.0.0/24 port=8728', $script);
+        $this->assertStringContainsString('address=10.8.0.0/24,192.168.0.0/24 comment="Platform. Do not remove."', $script);
+        $this->assertStringContainsString('dst-port=8728 src-address=192.168.0.0/24', $script);
+        $this->assertStringContainsString('comment="platform-api-allow-local"', $script);
+
+        // And the allowance is useless unless it is read before the rule that drops everything.
+        $this->assertLessThan(
+            strpos($script, 'platform-api-drop'),
+            strpos($script, 'platform-api-allow-local'),
+        );
+    }
+
+    #[Test]
+    public function a_malformed_local_subnet_is_refused_rather_than_patched_up(): void
+    {
+        // It is written straight into a firewall rule. A typo quietly becoming 0.0.0.0/0 would
+        // open the API to everyone on the strength of a misplaced character.
+        foreach (['0.0.0.0/0; /user add name=x', 'not-an-address', '192.168.0.0/99', '192.168.0.0/24 or 1=1'] as $bad) {
+            config(['wireguard.local_api_subnet' => $bad]);
+
+            $script = $this->script();
+
+            $this->assertStringNotContainsString(
+                'action=accept comment="platform-api-allow-local"',
+                $script,
+                sprintf('[%s] was let through.', $bad),
+            );
+            $this->assertStringContainsString('set api address=10.8.0.0/24 port=8728', $script);
+        }
+    }
+
+    #[Test]
+    public function generating_a_script_points_the_router_at_its_tunnel(): void
+    {
+        config(['wireguard.manage_over_tunnel' => true]);
+
+        $this->script();
+
+        $this->assertSame('10.8.0.2', $this->router->fresh()->host);
+    }
+
+    #[Test]
+    public function a_machine_with_no_tunnel_leaves_the_router_where_it_can_be_reached(): void
+    {
+        // The rewrite runs on every render of the setup page, not on a button. Without this
+        // guard a developer who merely looked at the script found their bench router had
+        // stopped answering, timing out against a 10.8.0.x address they never typed.
+        config(['wireguard.manage_over_tunnel' => false]);
+
+        $this->router->forceFill(['host' => '192.168.0.102', 'api_port' => 8728])->save();
+
+        $this->script();
+
+        $this->assertSame('192.168.0.102', $this->router->fresh()->host);
+    }
+
     protected function script(): string
     {
         return app(RouterSetupScript::class)->for($this->router, ['lan_interface' => 'ether3']);

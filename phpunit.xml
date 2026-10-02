@@ -32,5 +32,15 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!--
+            Pinned to the production defaults so the suite does not inherit a developer's .env.
+            Both exist for a router sitting on somebody's desk, and a laptop that sets them was
+            quietly running a different test suite from the server: the tunnel assertions passed
+            on CI and failed locally, which is the kind of difference that teaches people to
+            distrust the tests rather than the setting. Anything exercising the bench behaviour
+            sets it with config() in the test itself.
+        -->
+        <env name="WIREGUARD_MANAGE_OVER_TUNNEL" value="true"/>
+        <env name="WIREGUARD_LOCAL_API_SUBNET" value=""/>
     </php>
 </phpunit>
