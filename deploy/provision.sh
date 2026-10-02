@@ -56,17 +56,36 @@ say() { printf '\n==> %s\n' "$1"; }
 # ---------------------------------------------------------------------------
 say "Packages"
 # ---------------------------------------------------------------------------
-# php-sodium is installed even though the application carries paragonie/sodium_compat: the
-# shim exists because XAMPP ships without the extension, and where the real one is present the
-# WireGuard key clamping should use it.
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq \
-    nginx \
-    "php${PHP_VER}-fpm" "php${PHP_VER}-cli" "php${PHP_VER}-mysql" "php${PHP_VER}-mbstring" \
-    "php${PHP_VER}-xml" "php${PHP_VER}-curl" "php${PHP_VER}-zip" "php${PHP_VER}-bcmath" \
-    "php${PHP_VER}-gd" "php${PHP_VER}-intl" "php${PHP_VER}-redis" "php${PHP_VER}-sodium" \
-    mysql-client redis-server git curl unzip certbot wireguard >/dev/null
+
+# Asked for by name, but only the ones this release actually packages. Which extensions ship
+# as separate packages and which are built into php-common differs between releases — 8.5
+# compiles sodium in, so `php8.5-sodium` does not exist and asking for it aborts the whole
+# install over an extension that is already present.
+#
+# What matters is the loaded extension, not the package, so the list is filtered here and the
+# result is checked against `php -m` below.
+wanted=(nginx mysql-client redis-server git curl unzip certbot wireguard)
+for ext in fpm cli mysql mbstring xml curl zip bcmath gd intl redis sodium; do
+    wanted+=("php${PHP_VER}-${ext}")
+done
+
+available=()
+skipped=()
+for pkg in "${wanted[@]}"; do
+    if apt-cache show "$pkg" >/dev/null 2>&1; then
+        available+=("$pkg")
+    else
+        skipped+=("$pkg")
+    fi
+done
+
+apt-get install -y -qq "${available[@]}" >/dev/null
+
+if [ ${#skipped[@]} -gt 0 ]; then
+    echo "  not packaged on this release: ${skipped[*]}"
+fi
 
 if ! command -v composer >/dev/null 2>&1; then
     curl -fsSL https://getcomposer.org/installer -o /tmp/composer-setup.php
@@ -80,6 +99,21 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 printf '  php %s, node %s\n' "$(php -r 'echo PHP_VERSION;')" "$(node -v)"
+
+# The package names were a means; these are the end. Checked against what PHP reports rather
+# than against what apt installed, so an extension that arrived built in counts and one that
+# silently failed to install does not.
+missing=()
+for ext in mbstring dom curl zip bcmath gd intl pdo_mysql openssl tokenizer fileinfo redis; do
+    php -m | grep -qix "$ext" || missing+=("$ext")
+done
+
+if [ ${#missing[@]} -gt 0 ]; then
+    echo "  Missing PHP extensions: ${missing[*]}" >&2
+    echo "  Install them and run this again; the application will not boot without them." >&2
+    exit 1
+fi
+echo "  extensions present"
 
 # ---------------------------------------------------------------------------
 say "Deploy key for the private repository"
