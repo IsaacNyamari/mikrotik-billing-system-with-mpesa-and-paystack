@@ -82,7 +82,13 @@ fi
 # ---------------------------------------------------------------------------
 say "Switching nginx onto the real block"
 # ---------------------------------------------------------------------------
-install -m 644 "${APP_DIR}/deploy/nginx/${APP_DOMAIN}.conf" "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
+# Same substitution as provision.sh: which PHP-FPM socket exists is a property of the box,
+# not of this repository.
+socket="$(ls /run/php/php*-fpm.sock 2>/dev/null | sort -V | tail -1)"
+socket="${socket:-/run/php/php8.3-fpm.sock}"
+sed "s|unix:/run/php/php[0-9.]*-fpm\.sock|unix:${socket}|g"     "${APP_DIR}/deploy/nginx/${APP_DOMAIN}.conf"     > "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
+chmod 644 "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
+echo "  fpm socket: ${socket}"
 ln -sfn "/etc/nginx/sites-available/${APP_DOMAIN}.conf" "/etc/nginx/sites-enabled/${APP_DOMAIN}.conf"
 
 nginx -t

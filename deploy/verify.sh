@@ -36,7 +36,8 @@ remote_state="$(
             echo 'DIRTY'
             git --no-pager diff --stat HEAD | sed 's/^/  /'
         fi
-        for unit in nginx php8.3-fpm isp-scheduler.service isp-queue.service; do
+        fpm=\$(systemctl list-units --type=service --state=running --no-legend 'php*-fpm.service' 2>/dev/null | awk '{print \$1}' | head -1)
+        for unit in nginx \${fpm:-php-fpm} isp-scheduler.service isp-queue.service; do
             echo \"UNIT \$unit \$(systemctl is-active \$unit 2>/dev/null || echo unknown)\"
         done
     "

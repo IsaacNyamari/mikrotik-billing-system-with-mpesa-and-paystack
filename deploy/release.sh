@@ -154,7 +154,17 @@ find public -type d -exec chmod 2755 {} \;
 find public -type f -exec chmod 644 {} \;
 
 echo "==> Restart"
-systemctl restart php8.3-fpm 2>/dev/null || systemctl restart php-fpm 2>/dev/null || true
+# Whichever FPM this box actually runs. Naming a version worked until the server was rebuilt
+# on a release carrying a different one, at which point the restart failed silently — `|| true`
+# swallowed it — and every deploy served the previous build's cached config until somebody
+# restarted it by hand.
+fpm="$(systemctl list-units --type=service --state=running --no-legend 'php*-fpm.service' 2>/dev/null | awk '{print $1}' | head -1)"
+if [ -n "$fpm" ]; then
+    systemctl restart "$fpm"
+    echo "  restarted ${fpm}"
+else
+    echo "  WARNING: no running php-fpm service found; opcache may still hold the old build." >&2
+fi
 systemctl restart isp-queue.service 2>/dev/null || true
 systemctl restart isp-scheduler.service 2>/dev/null || true
 

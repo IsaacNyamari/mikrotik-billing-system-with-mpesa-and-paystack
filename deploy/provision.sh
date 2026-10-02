@@ -25,8 +25,25 @@ REPO="${REPO:-git@github.com:IsaacNyamari/mikrotik-billing-system-with-mpesa-and
 BRANCH="${BRANCH:-main}"
 DB_NAME="${DB_NAME:-isp_platform}"
 DB_USER="${DB_USER:-isp_platform}"
-PHP_VER="${PHP_VER:-8.3}"
 WG_PORT="${WG_PORT:-51820}"
+
+# Whatever this release of Ubuntu actually ships, rather than whatever it shipped when this was
+# written. Pinning 8.3 meant 26.04 — which carries 8.5 and nothing older — failed at the first
+# apt-get with a package name that does not exist, which reads as a broken script rather than a
+# wrong assumption.
+if [ -z "${PHP_VER:-}" ]; then
+    if command -v php >/dev/null 2>&1; then
+        PHP_VER="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')"
+    else
+        PHP_VER="$(apt-cache search --names-only '^php[0-9.]+-fpm$' 2>/dev/null |
+            sed -n 's/^php\([0-9.]*\)-fpm .*/\1/p' | sort -V | tail -1)"
+    fi
+fi
+
+if [ -z "$PHP_VER" ]; then
+    echo "Could not work out which PHP this system has. Set PHP_VER and run again." >&2
+    exit 1
+fi
 DEPLOY_KEY="${DEPLOY_KEY:-/root/.ssh/isp_deploy}"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -110,18 +127,26 @@ say "Database"
 # ---------------------------------------------------------------------------
 # The password is generated here and written only into .env. Nobody needs to know it, and a
 # password nobody knows is one nobody can paste into a support ticket.
+#
+# Nothing here drops anything. The database may already exist — somebody creating it by hand
+# before running this is the ordinary case, not a mistake — so this creates what is missing and
+# sets the credentials the .env below will carry. Tables and rows are never touched.
 DB_PASS=""
-if mysql -e "use ${DB_NAME}" 2>/dev/null; then
-    echo "  ${DB_NAME} already exists, left alone"
+if [ -f "${APP_DIR}/.env" ]; then
+    # An .env already holds a password this script does not know. Resetting the user's password
+    # would lock the running application out of its own database.
+    echo "  .env already present, leaving the database and its user alone"
 else
     DB_PASS="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28)"
     mysql <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}';
+ALTER USER '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}';
 GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
-    echo "  created ${DB_NAME} and its user"
+    tables="$(mysql -N -B -e "select count(*) from information_schema.tables where table_schema='${DB_NAME}';" 2>/dev/null || echo 0)"
+    echo "  ${DB_NAME} ready (${tables} existing table(s)), user ${DB_USER} set"
 fi
 
 # ---------------------------------------------------------------------------
@@ -145,12 +170,6 @@ say "Environment"
 if [ -f "${APP_DIR}/.env" ]; then
     echo "  .env already present, left alone"
 else
-    if [ -z "$DB_PASS" ]; then
-        echo "  The database existed but there is no .env, so its password is unknown here." >&2
-        echo "  Write ${APP_DIR}/.env yourself, or drop ${DB_NAME} and run this again." >&2
-        exit 1
-    fi
-
     cat >"${APP_DIR}/.env" <<ENV
 APP_NAME="ISP Platform"
 APP_ENV=production
@@ -244,6 +263,19 @@ if grep -q '^WIREGUARD_PUBLIC_KEY=$' "${APP_DIR}/.env"; then
 fi
 echo "  public key in .env"
 
+# The committed block names a PHP-FPM socket, and which one exists depends on the release of
+# Ubuntu underneath rather than on anything in this repository. Substituted on the way in, so
+# the committed file stays a valid config to read while the installed one matches the box.
+install_site() {
+    local socket
+    socket="$(ls /run/php/php*-fpm.sock 2>/dev/null | sort -V | tail -1)"
+    socket="${socket:-/run/php/php${PHP_VER}-fpm.sock}"
+
+    sed "s|unix:/run/php/php[0-9.]*-fpm\.sock|unix:${socket}|g"         "${APP_DIR}/deploy/nginx/${APP_DOMAIN}.conf"         > "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
+    chmod 644 "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
+    echo "  fpm socket: ${socket}"
+}
+
 # ---------------------------------------------------------------------------
 say "nginx"
 # ---------------------------------------------------------------------------
@@ -252,7 +284,7 @@ say "nginx"
 mkdir -p /var/www/html/.well-known/acme-challenge
 
 if [ -f "/etc/letsencrypt/live/${APP_DOMAIN}/fullchain.pem" ]; then
-    install -m 644 "${APP_DIR}/deploy/nginx/${APP_DOMAIN}.conf" "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
+    install_site
     echo "  certificate already present, installed the real block"
 else
     cat >"/etc/nginx/sites-available/${APP_DOMAIN}.conf" <<CONF
