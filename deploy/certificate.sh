@@ -84,7 +84,10 @@ say "Switching nginx onto the real block"
 # ---------------------------------------------------------------------------
 # Same substitution as provision.sh: which PHP-FPM socket exists is a property of the box,
 # not of this repository.
-socket="$(ls /run/php/php*-fpm.sock 2>/dev/null | sort -V | tail -1)"
+# A versioned socket by preference. /run/php/php-fpm.sock is an /etc/alternatives
+# symlink that follows whichever PHP is the system default, so a later version
+# becoming default would silently move this site onto it.
+socket="$(ls /run/php/php[0-9]*-fpm.sock 2>/dev/null | sort -V | tail -1)"
 socket="${socket:-/run/php/php8.3-fpm.sock}"
 sed "s|unix:/run/php/php[0-9.]*-fpm\.sock|unix:${socket}|g"     "${APP_DIR}/deploy/nginx/${APP_DOMAIN}.conf"     > "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
 chmod 644 "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
