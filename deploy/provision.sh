@@ -141,7 +141,14 @@ Host github.com
 CONF
 chmod 600 /root/.ssh/config
 
-if ! ssh -o BatchMode=yes -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+# Captured, then matched, rather than piped straight into grep. `ssh -T` to GitHub always exits
+# 1 — it authenticates you and then closes, because there is no shell to give — and under
+# `set -o pipefail` that exit code becomes the pipeline's, however well grep did. The check
+# therefore reported a working deploy key as a missing one, and said so convincingly.
+github_auth="$(ssh -o BatchMode=yes -T git@github.com 2>&1 || true)"
+
+if ! grep -q "successfully authenticated" <<<"$github_auth"; then
+    echo "  ${github_auth}" | head -3
     echo
     echo "  This server cannot read the repository yet. Add the public key below at:"
     echo
