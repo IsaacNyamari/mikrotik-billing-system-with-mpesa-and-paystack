@@ -113,8 +113,22 @@ new #[Title('Choose an ISP')] class extends Component {
                     @endif
                 </flux:card>
             @empty
-                <flux:card class="py-10 text-center">
-                    <flux:text>{{ __('No ISPs exist yet.') }}</flux:text>
+                {{-- The first thing a freshly deployed platform shows its own administrator,
+                     so it says how an ISP comes to exist rather than only that none does. --}}
+                <flux:card class="flex flex-col items-center gap-3 py-10 text-center">
+                    <flux:icon.building-office-2 class="size-8 text-zinc-400" />
+
+                    <div>
+                        <flux:heading size="lg">{{ __('No ISPs exist yet') }}</flux:heading>
+                        <flux:subheading>
+                            {{ __('There is no application to approve: an ISP signs up and starts selling. What gates them is the subscription, not permission.') }}
+                        </flux:subheading>
+                    </div>
+
+                    <flux:text class="text-sm">
+                        {{ __('Send them here to open an account:') }}
+                        <a href="{{ route('register') }}" class="font-mono underline" rel="noopener">{{ route('register') }}</a>
+                    </flux:text>
                 </flux:card>
             @endforelse
         </div>

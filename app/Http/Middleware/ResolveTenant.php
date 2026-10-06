@@ -80,8 +80,17 @@ class ResolveTenant
             return false;
         }
 
-        // Nothing to choose from on a fresh install.
-        return Tenant::query()->exists();
+        // Diverted even when there is nothing to choose from.
+        //
+        // This used to return `Tenant::query()->exists()`, on the reasoning that sending
+        // somebody to an empty picker is pointless. It is — but the alternative it chose was
+        // worse: the request carried on, the first tenant-scoped query threw
+        // TenantContextMissingException, and the very first thing the person who had just
+        // deployed the platform saw was a 500 page. Observed on a fresh production install
+        // within a minute of the admin account being created.
+        //
+        // The picker says "No ISPs exist yet", which is the true answer and a far better one.
+        return true;
     }
 
     protected function impersonatedTenant(Request $request): ?Tenant
