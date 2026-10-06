@@ -196,6 +196,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     protected function announceConnection(): void
     {
         if (($link = $this->signInLink) !== null) {
+            dd($link);
             $this->dispatch('portal-connect', url: $link);
         }
     }
