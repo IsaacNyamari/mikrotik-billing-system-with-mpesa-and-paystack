@@ -68,9 +68,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     {
         // Public route: no tenant is resolved yet, so the lookup deliberately spans every ISP
         // and then binds the one this router belongs to.
-        $router = Tenancy::withoutScope(
-            fn (): ?Router => Router::query()->withoutGlobalScopes()->where('portal_key', $portalKey)->first(),
-        );
+        $router = Tenancy::withoutScope(fn(): ?Router => Router::query()->withoutGlobalScopes()->where('portal_key', $portalKey)->first());
 
         abort_if($router === null, 404);
         abort_unless($router->tenant->isOperational(), 403, __('This service is not available.'));
@@ -92,10 +90,8 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
      */
     public function hydrate(): void
     {
-        if ($this->routerId !== 0 && ! Tenancy::has()) {
-            $router = Tenancy::withoutScope(
-                fn (): ?Router => Router::query()->withoutGlobalScopes()->find($this->routerId),
-            );
+        if ($this->routerId !== 0 && !Tenancy::has()) {
+            $router = Tenancy::withoutScope(fn(): ?Router => Router::query()->withoutGlobalScopes()->find($this->routerId));
 
             if ($router !== null) {
                 Tenancy::set($router->tenant);
@@ -131,12 +127,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     #[Computed]
     public function plans(): Collection
     {
-        return Plan::query()
-            ->ofType(\App\Enums\PlanType::Hotspot)
-            ->sellable()
-            ->orderBy('sort_order')
-            ->orderBy('price')
-            ->get();
+        return Plan::query()->ofType(\App\Enums\PlanType::Hotspot)->sellable()->orderBy('sort_order')->orderBy('price')->get();
     }
 
     /**
@@ -159,7 +150,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
 
         $gateway = $this->router->setupOptions()['hotspot_gateway'] ?? null;
 
-        return filter_var($gateway, FILTER_VALIDATE_IP) === false ? null : 'http://'.$gateway.'/login';
+        return filter_var($gateway, FILTER_VALIDATE_IP) === false ? null : 'http://' . $gateway . '/login';
     }
 
     /**
@@ -179,7 +170,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             return null;
         }
 
-        return $url.'?username='.rawurlencode($access->username).'&password='.rawurlencode($access->password);
+        return $url . '?username=' . rawurlencode($access->username) . '&password=' . rawurlencode($access->password);
     }
 
     /**
@@ -203,9 +194,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     #[Computed]
     public function payment(): ?Payment
     {
-        return $this->paymentId === null
-            ? null
-            : Payment::query()->with('hotspotUser')->find($this->paymentId);
+        return $this->paymentId === null ? null : Payment::query()->with('hotspotUser')->find($this->paymentId);
     }
 
     /**
@@ -283,14 +272,17 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
 
     public function pay(PaymentCollector $collector): void
     {
-        $validated = $this->validate([
-            'selectedPlanId' => ['required', Rule::exists('plans', 'id')->where('tenant_id', Tenancy::id())],
-            // Kenyan mobile numbers, however the customer chooses to type them.
-            'phone' => ['required', 'string', 'regex:/^(?:\+?254|0)?7\d{8}$|^(?:\+?254|0)?1\d{8}$/'],
-        ], [
-            'phone.regex' => __('Enter a Safaricom number like 07XX XXX XXX.'),
-            'selectedPlanId.required' => __('Choose a package first.'),
-        ]);
+        $validated = $this->validate(
+            [
+                'selectedPlanId' => ['required', Rule::exists('plans', 'id')->where('tenant_id', Tenancy::id())],
+                // Kenyan mobile numbers, however the customer chooses to type them.
+                'phone' => ['required', 'string', 'regex:/^(?:\+?254|0)?7\d{8}$|^(?:\+?254|0)?1\d{8}$/'],
+            ],
+            [
+                'phone.regex' => __('Enter a Safaricom number like 07XX XXX XXX.'),
+                'selectedPlanId.required' => __('Choose a package first.'),
+            ],
+        );
 
         $plan = Plan::query()->findOrFail($validated['selectedPlanId']);
 
@@ -348,7 +340,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             // has never heard of.
             $access = $this->access;
 
-            if ($access !== null && $access->status !== HotspotUserStatus::Active && ! $access->hasExpired()) {
+            if ($access !== null && $access->status !== HotspotUserStatus::Active && !$access->hasExpired()) {
                 app(HotspotUserProvisioner::class)->provision($access);
 
                 unset($this->access, $this->signInLink);
@@ -406,32 +398,32 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
      * payment the provider has not been asked about yet. Only when none of those finds anything
      * is the customer told the code is unknown.
      */
-    public function recover(
-        PaymentReconciler $reconciler,
-        CallbackProcessor $processor,
-        HotspotUserProvisioner $provisioner,
-    ): void {
+    public function recover(PaymentReconciler $reconciler, CallbackProcessor $processor, HotspotUserProvisioner $provisioner): void
+    {
         // Tidied before it is validated, not after. Somebody copying a code out of an SMS
         // brings a trailing space with it and reads the characters off in whatever case they
         // see them, and a page that answers that with a complaint about punctuation is a page
         // arguing with a customer who has done nothing wrong.
         $this->code = strtoupper(trim($this->code));
 
-        $this->validate([
-            // M-PESA receipts are ten characters; codes issued at a counter are the same shape.
-            // The bound is loose on purpose — a customer mistyping is told so by the lookup, in
-            // plain words, rather than by a validator quibbling about length.
-            'code' => ['required', 'string', 'min:6', 'max:32', 'regex:/^[A-Z0-9]+$/'],
-        ], [
-            'code.required' => __('Enter the code from your M-PESA message.'),
-            'code.regex' => __('A code is only letters and numbers, like QGR4TZ8LMN.'),
-            'code.min' => __('That code looks too short. Check your M-PESA message.'),
-        ]);
+        $this->validate(
+            [
+                // M-PESA receipts are ten characters; codes issued at a counter are the same shape.
+                // The bound is loose on purpose — a customer mistyping is told so by the lookup, in
+                // plain words, rather than by a validator quibbling about length.
+                'code' => ['required', 'string', 'min:6', 'max:32', 'regex:/^[A-Z0-9]+$/'],
+            ],
+            [
+                'code.required' => __('Enter the code from your M-PESA message.'),
+                'code.regex' => __('A code is only letters and numbers, like QGR4TZ8LMN.'),
+                'code.min' => __('That code looks too short. Check your M-PESA message.'),
+            ],
+        );
 
         // Codes are ten characters from an alphabet of thirty-odd, so guessing one is not a
         // realistic attack. The limit is here because an unmetered lookup on a public page is
         // still a public page doing unmetered database work.
-        $key = 'portal-recover:'.$this->routerId.':'.(request()->ip() ?? 'unknown');
+        $key = 'portal-recover:' . $this->routerId . ':' . (request()->ip() ?? 'unknown');
 
         if (RateLimiter::tooManyAttempts($key, 10)) {
             $this->addError('code', __('Too many tries. Wait a minute, then try again.'));
@@ -446,11 +438,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         // Scoped to this router, not just this ISP: the login only exists on the device the
         // customer is standing in front of, so a code from another branch would be found here
         // and then fail to let them on — which is worse than not finding it.
-        $access = HotspotUser::query()
-            ->where('router_id', $this->routerId)
-            ->where('username', $code)
-            ->latest('id')
-            ->first();
+        $access = HotspotUser::query()->where('router_id', $this->routerId)->where('username', $code)->latest('id')->first();
 
         if ($access === null) {
             $access = $this->accessFromPayment($code, $reconciler, $processor);
@@ -500,11 +488,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
      */
     protected function accessFromPayment(string $code, PaymentReconciler $reconciler, CallbackProcessor $processor): ?HotspotUser
     {
-        $payment = Payment::query()
-            ->where('router_id', $this->routerId)
-            ->where('receipt', $code)
-            ->latest('id')
-            ->first();
+        $payment = Payment::query()->where('router_id', $this->routerId)->where('receipt', $code)->latest('id')->first();
 
         if ($payment === null) {
             return null;
@@ -534,9 +518,7 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         // landed. This is the case the whole screen exists for.
         $payment = $processor->grantAccess($payment);
 
-        return $payment->hotspot_user_id === null
-            ? null
-            : HotspotUser::query()->find($payment->hotspot_user_id);
+        return $payment->hotspot_user_id === null ? null : HotspotUser::query()->find($payment->hotspot_user_id);
     }
 
     /**
@@ -582,7 +564,8 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
 <div class="portal">
     <header class="portal__head">
         @if ($this->branding->logoUrl())
-            <img src="{{ $this->branding->logoUrl() }}" alt="{{ $this->branding->displayName($this->tenant) }}" class="portal__logo">
+            <img src="{{ $this->branding->logoUrl() }}" alt="{{ $this->branding->displayName($this->tenant) }}"
+                class="portal__logo">
         @endif
 
         <h1 class="portal__title">{{ $this->branding->displayName($this->tenant) }}</h1>
@@ -603,9 +586,11 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         {{-- Polled a little slower than the payment screen: each pass is a real attempt to reach
              a router that has already refused once, and hammering a device that is down helps
              nobody. hotspot:sweep --retry is trying the same thing in the background. --}}
-        <div class="note note--good" @if (! $live) wire:poll.5s="retryAccess" @endif>
-            <svg @class(['icon', 'pulse' => ! $live]) viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-                <circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5" stroke-linecap="round" stroke-linejoin="round"/>
+        <div class="note note--good" @if (!$live) wire:poll.5s="retryAccess" @endif>
+            <svg @class(['icon', 'pulse' => !$live]) viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="1.75" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="m8.5 12.5 2.5 2.5 4.5-5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             <h2 class="note__title">{{ __('Payment received') }}</h2>
             <p class="note__text">
@@ -661,10 +646,13 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                  a code recovered on the way in. The polled case cannot be handled here: this
                  markup is patched into a running page, and a script patched in is never run.
                  That is what the listener at the bottom of the page is for. --}}
-            <script>window.portalConnect && window.portalConnect(@js($this->signInLink));</script>
+            <script>
+                window.portalConnect && window.portalConnect(@js($this->signInLink));
+            </script>
         @elseif ($live)
             <div class="note note--warn">
-                <p class="note__text">{{ __('Now return to the wifi login page and sign in with the code above.') }}</p>
+                <p class="note__text">{{ __('Now return to the wifi login page and sign in with the code above.') }}
+                </p>
             </div>
         @endif
     @elseif ($this->payment?->status === App\Enums\PaymentStatus::Paid)
@@ -672,8 +660,10 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
              was unreachable at that moment. Keep polling: checkPayment retries the issue, and
              hotspot:sweep --retry is doing the same in the background. --}}
         <div class="note note--good" wire:poll.3s="checkPayment">
-            <svg class="icon pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-                <circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5" stroke-linecap="round" stroke-linejoin="round"/>
+            <svg class="icon pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"
+                aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="m8.5 12.5 2.5 2.5 4.5-5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             <h2 class="note__title">{{ __('Payment received') }}</h2>
             <p class="note__text">{{ __('Setting up your access…') }}</p>
@@ -683,8 +673,10 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         </div>
     @elseif ($this->isWaiting)
         <div class="note note--plain" wire:poll.3s="checkPayment">
-            <svg class="icon pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-                <rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2" stroke-linecap="round"/>
+            <svg class="icon pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"
+                aria-hidden="true">
+                <rect x="7" y="2.5" width="10" height="19" rx="2" />
+                <path d="M11 18.5h2" stroke-linecap="round" />
             </svg>
             <h2 class="note__title">{{ __('Check your phone') }}</h2>
             <p class="note__text">
@@ -695,13 +687,17 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     @elseif ($this->payment && $this->payment->status->isSettled())
         <div class="note note--bad">
             @if ($this->payment->status === App\Enums\PaymentStatus::Cancelled)
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9"/><path d="M8 12h8" stroke-linecap="round"/>
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"
+                    aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M8 12h8" stroke-linecap="round" />
                 </svg>
                 <h2 class="note__title">{{ __('Payment cancelled') }}</h2>
             @else
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9"/><path d="m9 9 6 6m0-6-6 6" stroke-linecap="round"/>
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"
+                    aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="m9 9 6 6m0-6-6 6" stroke-linecap="round" />
                 </svg>
                 <h2 class="note__title">{{ $this->payment->status->label() }}</h2>
             @endif
@@ -726,7 +722,9 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                 <div>
                     <p class="chosen__name" style="margin:0">{{ $plan->name }}</p>
                     <p class="chosen__meta" style="margin:.125rem 0 0">
-                        {{ $plan->validityForHumans() }}@if ($this->branding->show_speed) &middot; {{ $plan->speedForHumans() }}@endif
+                        {{ $plan->validityForHumans() }}@if ($this->branding->show_speed)
+                            &middot; {{ $plan->speedForHumans() }}
+                        @endif
                     </p>
                     <button type="button" class="link" style="margin-top:.375rem" wire:click="changePlan">
                         {{ __('Change package') }}
@@ -734,7 +732,8 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                 </div>
 
                 <p class="chosen__price" style="margin:0">
-                    <small style="font-size:.75rem;font-weight:600;opacity:.7">{{ $this->branding->displayCurrency($this->tenant) }}</small>
+                    <small
+                        style="font-size:.75rem;font-weight:600;opacity:.7">{{ $this->branding->displayCurrency($this->tenant) }}</small>
                     {{ number_format((float) $plan->price, 0) }}
                 </p>
             </div>
@@ -742,17 +741,8 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             <form wire:submit="pay">
                 <div class="field">
                     <label class="field__label" for="portal-phone">{{ __('M-PESA number') }}</label>
-                    <input
-                        id="portal-phone"
-                        wire:model="phone"
-                        type="tel"
-                        inputmode="numeric"
-                        autocomplete="tel"
-                        placeholder="07XX XXX XXX"
-                        autofocus
-                        required
-                        @class(['field__input', 'field__input--bad' => $errors->has('phone')])
-                    >
+                    <input id="portal-phone" wire:model="phone" type="tel" inputmode="numeric"
+                        autocomplete="tel" placeholder="07XX XXX XXX" autofocus required @class(['field__input', 'field__input--bad' => $errors->has('phone')])>
                     @error('phone')
                         <p class="field__error">{{ $message }}</p>
                     @enderror
@@ -767,10 +757,13 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                     </div>
                 @enderror
 
-                <button type="submit" class="btn" style="margin-top:1rem" wire:loading.attr="disabled" wire:target="pay">
-                    <svg wire:loading wire:target="pay" class="spinner" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" opacity=".25"/>
-                        <path fill="currentColor" opacity=".75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+                <button type="submit" class="btn" style="margin-top:1rem" wire:loading.attr="disabled"
+                    wire:target="pay">
+                    <svg wire:loading wire:target="pay" class="spinner" viewBox="0 0 24 24" fill="none"
+                        aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"
+                            opacity=".25" />
+                        <path fill="currentColor" opacity=".75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                     </svg>
                     <span wire:loading.remove wire:target="pay">
                         {{ __('Pay :currency :amount', [
@@ -789,9 +782,11 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
     @else
         @if ($this->branding->show_banner && $this->plans->isNotEmpty())
             <div class="banner">
-                <svg class="banner__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
-                    <path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0" stroke-linecap="round"/>
-                    <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none"/>
+                <svg class="banner__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="1.75" aria-hidden="true">
+                    <path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0"
+                        stroke-linecap="round" />
+                    <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
                 </svg>
                 <span>{{ $this->branding->displayBannerText($this->tenant) }}</span>
             </div>
@@ -809,12 +804,13 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                 <p class="note__text">{{ __('No packages are on sale right now.') }}</p>
             </div>
         @else
-            <div @class(['deals', 'deals--list' => ! $this->branding->usesGrid()])>
+            <div @class(['deals', 'deals--list' => !$this->branding->usesGrid()])>
                 @foreach ($this->plans as $plan)
-                    <div
-                        wire:key="plan-{{ $plan->id }}"
-                        @class(['deal', 'deal--tinted' => $this->branding->isTinted(), 'deal--plain' => ! $this->branding->isTinted()])
-                    >
+                    <div wire:key="plan-{{ $plan->id }}" @class([
+                        'deal',
+                        'deal--tinted' => $this->branding->isTinted(),
+                        'deal--plain' => !$this->branding->isTinted(),
+                    ])>
                         <span class="deal__badge">{{ $plan->validityForHumans() }}</span>
 
                         <div class="deal__body">
@@ -833,18 +829,14 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
                             @endif
 
                             @if ($plan->data_cap_mb && $this->branding->show_data_cap)
-                                <p class="deal__meta">{{ number_format($plan->data_cap_mb) }} MB {{ __('included') }}</p>
+                                <p class="deal__meta">{{ number_format($plan->data_cap_mb) }} MB {{ __('included') }}
+                                </p>
                             @endif
                         </div>
 
                         {{-- One tap chooses; the number is asked for on the next screen. --}}
-                        <button
-                            type="button"
-                            class="deal__cta"
-                            wire:click="choose({{ $plan->id }})"
-                            wire:loading.attr="disabled"
-                            @disabled(! $this->canTakePayment)
-                        >
+                        <button type="button" class="deal__cta" wire:click="choose({{ $plan->id }})"
+                            wire:loading.attr="disabled" @disabled(!$this->canTakePayment)>
                             {{ $this->branding->displayBuyLabel() }}
                         </button>
                     </div>
@@ -872,7 +864,8 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
 
         @if ($this->branding->terms_url)
             <p style="margin:.25rem 0 0">
-                <a href="{{ $this->branding->terms_url }}" rel="noopener noreferrer" target="_blank">{{ __('Terms of service') }}</a>
+                <a href="{{ $this->branding->terms_url }}" rel="noopener noreferrer"
+                    target="_blank">{{ __('Terms of service') }}</a>
             </p>
         @endif
     </footer>
@@ -889,32 +882,32 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
          @script is evaluated by Livewire on the component's own initialisation, so the listener
          is in place before it is needed and survives every re-render after. --}}
     @script
-    <script>
-        (function () {
-            let going = false;
+        <script>
+            (function() {
+                let going = false;
 
-            // Named on window so the panel's own inline script can reach it too, for the
-            // customer who arrives with their access already live — a reload, or a code
-            // recovered on the way in.
-            window.portalConnect = function (url) {
-                if (going || ! url) {
-                    return;
-                }
+                // Named on window so the panel's own inline script can reach it too, for the
+                // customer who arrives with their access already live — a reload, or a code
+                // recovered on the way in.
+                window.portalConnect = function(url) {
+                    if (going || !url) {
+                        return;
+                    }
 
-                going = true;
+                    going = true;
 
-                // Given a moment first: the router has only just been told about this login,
-                // and a device that answers before it knows the code shows the customer a
-                // failure for something that is about to work.
-                setTimeout(function () {
-                    window.location.href = url;
-                }, 800);
-            };
+                    // Given a moment first: the router has only just been told about this login,
+                    // and a device that answers before it knows the code shows the customer a
+                    // failure for something that is about to work.
+                    setTimeout(function() {
+                        window.location.href = url;
+                    }, 800);
+                };
 
-            $wire.on('portal-connect', function (event) {
-                window.portalConnect(Array.isArray(event) ? event[0]?.url : event?.url);
-            });
-        })();
-    </script>
+                $wire.on('portal-connect', function(event) {
+                    window.portalConnect(Array.isArray(event) ? event[0]?.url : event?.url);
+                });
+            })();
+        </script>
     @endscript
 </div>
