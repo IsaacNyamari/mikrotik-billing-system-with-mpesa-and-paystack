@@ -17,7 +17,7 @@ new #[Layout('components.layouts.frontend')] #[Title('About us')] class extends 
     />
 
     <x-frontend.section align="left">
-        <div class="mx-auto max-w-3xl space-y-6 text-zinc-600 dark:text-zinc-400">
+        <div class="mx-auto max-w-3xl space-y-6 text-slate-600">
             <p class="text-lg">
                 {{ __('Most small ISPs run on a MikroTik, a spreadsheet and a phone full of M-PESA messages. The router works fine. The accounting is what falls over — vouchers written on paper, customers who paid but never got online, and no honest answer to how much last month made.') }}
             </p>
@@ -26,7 +26,7 @@ new #[Layout('components.layouts.frontend')] #[Title('About us')] class extends 
                 {{ __('This platform closes that gap. It sits between your routers and your customers: it takes the payment, writes the login onto the device, removes it when the time is up, and keeps the record of every shilling that moved. The router keeps doing what it is good at, and nobody has to be trusted to remember a step.') }}
             </p>
 
-            <h2 class="pt-4 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
+            <h2 class="pt-4 text-2xl font-bold tracking-tight text-slate-900">
                 {{ __('What we believe') }}
             </h2>
 
@@ -48,7 +48,7 @@ new #[Layout('components.layouts.frontend')] #[Title('About us')] class extends 
                 </x-frontend.feature>
             </div>
 
-            <h2 class="pt-4 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-white">
+            <h2 class="pt-4 text-2xl font-bold tracking-tight text-slate-900">
                 {{ __('How we make money') }}
             </h2>
 
@@ -61,7 +61,7 @@ new #[Layout('components.layouts.frontend')] #[Title('About us')] class extends 
             </p>
 
             <p class="pt-2">
-                <a href="{{ route('services') }}#pricing" class="font-medium text-zinc-900 underline underline-offset-4 dark:text-white">
+                <a href="{{ route('services') }}#pricing" class="fe-link">
                     {{ __('See the full pricing') }}
                 </a>
             </p>

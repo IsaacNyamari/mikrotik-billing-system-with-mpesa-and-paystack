@@ -9,8 +9,8 @@
 {{-- The wrapper every band of the site uses, so vertical rhythm and heading sizes are decided
      once rather than per page. --}}
 <section {{ $attributes->class([
-    'px-6 py-16 sm:py-24',
-    'bg-zinc-50 dark:bg-zinc-900/40' => $tint,
+    'px-4 py-16 sm:px-6 sm:py-24',
+    'border-y border-slate-200/70 bg-slate-50' => $tint,
 ]) }}>
     <div class="mx-auto max-w-6xl">
         @if ($eyebrow || $heading || $lead)
@@ -19,17 +19,20 @@
                 'mx-auto text-center' => $align === 'center',
             ])>
                 @if ($eyebrow)
-                    <p class="text-sm font-semibold uppercase tracking-wider text-zinc-500">{{ $eyebrow }}</p>
+                    <p class="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-brand-600">
+                        <span class="h-0.5 w-6 rounded-full bg-mint-400"></span>
+                        {{ $eyebrow }}
+                    </p>
                 @endif
 
                 @if ($heading)
-                    <h2 class="mt-2 text-3xl font-semibold tracking-tight text-zinc-900 sm:text-4xl dark:text-white">
+                    <h2 class="mt-3 text-3xl font-bold tracking-tight text-balance text-slate-900 sm:text-4xl">
                         {{ $heading }}
                     </h2>
                 @endif
 
                 @if ($lead)
-                    <p class="mt-4 text-lg text-zinc-600 dark:text-zinc-400">{{ $lead }}</p>
+                    <p class="mt-4 text-lg text-pretty text-slate-600">{{ $lead }}</p>
                 @endif
             </div>
         @endif

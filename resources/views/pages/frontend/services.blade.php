@@ -119,32 +119,32 @@ new #[Layout('components.layouts.frontend')] #[Title('Services and pricing')] cl
 
         {{-- A worked example. An ISP deciding whether to sign up is doing this arithmetic on
              paper anyway; better they do it with our numbers than their guess at them. --}}
-        <div class="mx-auto mt-12 max-w-3xl rounded-2xl border border-zinc-200 bg-white p-6 sm:p-8 dark:border-zinc-800 dark:bg-zinc-900">
-            <h3 class="font-semibold text-zinc-900 dark:text-white">{{ __('What a real month looks like') }}</h3>
-            <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+        <div class="mx-auto mt-12 max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-900/[0.04] sm:p-8">
+            <h3 class="font-semibold text-slate-900">{{ __('What a real month looks like') }}</h3>
+            <p class="mt-1 text-sm text-slate-600">
                 {{ __('An ISP collecting KSh 80,000 through the wifi portal and running 40 PPPoE lines, at 5%.') }}
             </p>
 
             <dl class="mt-6 space-y-3 text-sm">
-                <div class="flex justify-between gap-4 border-b border-zinc-100 pb-3 dark:border-zinc-800">
-                    <dt class="text-zinc-600 dark:text-zinc-400">{{ __('HotSpot collections') }}</dt>
-                    <dd class="font-medium text-zinc-900 dark:text-white">KSh 80,000</dd>
+                <div class="flex justify-between gap-4 border-b border-slate-100 pb-3">
+                    <dt class="text-slate-600">{{ __('HotSpot collections') }}</dt>
+                    <dd class="font-medium text-slate-900">KSh 80,000</dd>
                 </div>
-                <div class="flex justify-between gap-4 border-b border-zinc-100 pb-3 dark:border-zinc-800">
-                    <dt class="text-zinc-600 dark:text-zinc-400">{{ __('Commission at 5%') }}</dt>
-                    <dd class="font-medium text-zinc-900 dark:text-white">KSh 4,000</dd>
+                <div class="flex justify-between gap-4 border-b border-slate-100 pb-3">
+                    <dt class="text-slate-600">{{ __('Commission at 5%') }}</dt>
+                    <dd class="font-medium text-slate-900">KSh 4,000</dd>
                 </div>
-                <div class="flex justify-between gap-4 border-b border-zinc-100 pb-3 dark:border-zinc-800">
-                    <dt class="text-zinc-600 dark:text-zinc-400">{{ __('40 PPPoE lines × KSh :fee', ['fee' => number_format($pppoeFee, 0)]) }}</dt>
-                    <dd class="font-medium text-zinc-900 dark:text-white">KSh {{ number_format(40 * $pppoeFee, 0) }}</dd>
+                <div class="flex justify-between gap-4 border-b border-slate-100 pb-3">
+                    <dt class="text-slate-600">{{ __('40 PPPoE lines × KSh :fee', ['fee' => number_format($pppoeFee, 0)]) }}</dt>
+                    <dd class="font-medium text-slate-900">KSh {{ number_format(40 * $pppoeFee, 0) }}</dd>
                 </div>
                 <div class="flex justify-between gap-4 pt-1">
-                    <dt class="font-semibold text-zinc-900 dark:text-white">{{ __('Your bill for the month') }}</dt>
-                    <dd class="text-lg font-semibold text-zinc-900 dark:text-white">KSh {{ number_format(4000 + 40 * $pppoeFee, 0) }}</dd>
+                    <dt class="font-semibold text-slate-900">{{ __('Your bill for the month') }}</dt>
+                    <dd class="text-lg font-semibold text-slate-900">KSh {{ number_format(4000 + 40 * $pppoeFee, 0) }}</dd>
                 </div>
             </dl>
 
-            <p class="mt-6 text-sm text-zinc-600 dark:text-zinc-400">
+            <p class="mt-6 text-sm text-slate-600">
                 {{ __('The ISP keeps KSh :kept of the wifi money. The bill arrives at the start of the following month, falls due after :due days, and there are :grace more days after that before anything is restricted.', [
                     'kept' => number_format(80000 - 4000, 0),
                     'due' => $dueDays,
@@ -153,8 +153,8 @@ new #[Layout('components.layouts.frontend')] #[Title('Services and pricing')] cl
             </p>
         </div>
 
-        <div class="mx-auto mt-8 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
-            <p class="font-medium text-zinc-900 dark:text-white">{{ __('Worth being clear about') }}</p>
+        <div class="mx-auto mt-8 max-w-3xl text-sm text-slate-600">
+            <p class="font-medium text-slate-900">{{ __('Worth being clear about') }}</p>
             <ul class="mt-3 space-y-2">
                 <li>{{ __('Customer money goes to your own M-PESA or Paystack account, never through ours. We invoice you afterwards.') }}</li>
                 <li>{{ __('The setup fee is payable before the system opens. Everything after that is billed monthly in arrears.') }}</li>

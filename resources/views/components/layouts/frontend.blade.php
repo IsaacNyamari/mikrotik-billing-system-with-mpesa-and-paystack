@@ -7,6 +7,7 @@
         <title>{{ $title ?? __('ISP billing and MikroTik management') }} &mdash; {{ config('app.name') }}</title>
 
         <meta name="description" content="{{ $description ?? __('Sell wifi, manage PPPoE subscribers and control your MikroTik routers from one place. Pay as you earn.') }}">
+        <meta name="theme-color" content="#0b58ad">
 
         <link rel="icon" href="/favicon.ico" sizes="any">
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -17,7 +18,7 @@
         @fonts
         @vite(['resources/css/app.css'])
     </head>
-    <body class="min-h-screen bg-white font-sans text-zinc-800 antialiased dark:bg-zinc-950 dark:text-zinc-200">
+    <body class="min-h-screen bg-white font-sans text-slate-700 antialiased selection:bg-mint-300/60 selection:text-brand-950">
         <x-frontend.nav />
 
         <main>

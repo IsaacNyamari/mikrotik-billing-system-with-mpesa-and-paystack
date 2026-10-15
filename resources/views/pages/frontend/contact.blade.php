@@ -92,21 +92,21 @@ new #[Layout('components.layouts.frontend')] #[Title('Contact us')] class extend
     <section class="px-6 pb-20">
         <div class="mx-auto grid max-w-5xl gap-10 lg:grid-cols-[1fr_20rem]">
             {{-- The form ------------------------------------------------------------- --}}
-            <div class="rounded-2xl border border-zinc-200 bg-white p-6 sm:p-8 dark:border-zinc-800 dark:bg-zinc-900">
+            <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-900/[0.04] sm:p-8">
                 @if ($sent)
                     <div class="py-8 text-center">
-                        <span class="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                        <span class="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
                             <svg class="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <path d="m5 13 4 4L19 7" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                         </span>
 
-                        <h2 class="mt-4 text-xl font-semibold text-zinc-900 dark:text-white">{{ __('Thanks — we have it') }}</h2>
-                        <p class="mx-auto mt-2 max-w-sm text-sm text-zinc-600 dark:text-zinc-400">
+                        <h2 class="mt-4 text-xl font-semibold text-slate-900">{{ __('Thanks — we have it') }}</h2>
+                        <p class="mx-auto mt-2 max-w-sm text-sm text-slate-600">
                             {{ __('We usually reply within a working day. If it is urgent, call the number on this page.') }}
                         </p>
 
-                        <button type="button" wire:click="sendAnother" class="mt-6 text-sm font-medium text-zinc-900 underline underline-offset-4 dark:text-white">
+                        <button type="button" wire:click="sendAnother" class="mt-6 text-sm fe-link">
                             {{ __('Send another message') }}
                         </button>
                     </div>
@@ -121,28 +121,28 @@ new #[Layout('components.layouts.frontend')] #[Title('Contact us')] class extend
                         <div class="grid gap-5 sm:grid-cols-2">
                             <x-frontend.field name="name" :label="__('Your name')" required>
                                 <input id="name" type="text" wire:model="name" required
-                                    class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-white">
+                                    class="fe-input">
                             </x-frontend.field>
 
                             <x-frontend.field name="email" :label="__('Email')" required>
                                 <input id="email" type="email" wire:model="email" required
-                                    class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-white">
+                                    class="fe-input">
                             </x-frontend.field>
 
                             <x-frontend.field name="phone" :label="__('Phone')">
                                 <input id="phone" type="tel" wire:model="phone" placeholder="07XX XXX XXX"
-                                    class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-white">
+                                    class="fe-input">
                             </x-frontend.field>
 
                             <x-frontend.field name="company" :label="__('Business name')">
                                 <input id="company" type="text" wire:model="company"
-                                    class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-white">
+                                    class="fe-input">
                             </x-frontend.field>
                         </div>
 
                         <x-frontend.field name="routerCount" :label="__('How many routers do you run?')">
                             <select id="routerCount" wire:model="routerCount"
-                                class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-white">
+                                class="fe-input">
                                 <option value="">{{ __('Select one') }}</option>
                                 <option value="1">{{ __('Just one') }}</option>
                                 <option value="2-5">{{ __('Two to five') }}</option>
@@ -154,11 +154,11 @@ new #[Layout('components.layouts.frontend')] #[Title('Contact us')] class extend
                         <x-frontend.field name="message" :label="__('What do you need?')" required>
                             <textarea id="message" wire:model="message" rows="5" required
                                 placeholder="{{ __('We run a HotSpot in Kawangware and about 30 PPPoE homes…') }}"
-                                class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-white"></textarea>
+                                class="fe-input"></textarea>
                         </x-frontend.field>
 
                         <button type="submit" wire:loading.attr="disabled" wire:target="submit"
-                            class="inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-60 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200">
+                            class="fe-btn-primary">
                             <span wire:loading.remove wire:target="submit">{{ __('Send message') }}</span>
                             <span wire:loading wire:target="submit">{{ __('Sending…') }}</span>
                         </button>
@@ -168,34 +168,34 @@ new #[Layout('components.layouts.frontend')] #[Title('Contact us')] class extend
 
             {{-- The other ways to reach us ------------------------------------------- --}}
             <aside class="flex flex-col gap-4">
-                <div class="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-                    <h2 class="font-semibold text-zinc-900 dark:text-white">{{ __('Talk to a person') }}</h2>
-                    <p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+                <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-900/[0.04]">
+                    <h2 class="font-semibold text-slate-900">{{ __('Talk to a person') }}</h2>
+                    <p class="mt-2 text-sm text-slate-600">
                         {{ __('A form is fine for a quote. If your portal is down, call.') }}
                     </p>
 
                     <dl class="mt-4 space-y-3 text-sm">
                         <div>
-                            <dt class="text-zinc-500">{{ __('Email') }}</dt>
-                            <dd><a href="mailto:hello@solforbs.com" class="font-medium text-zinc-900 hover:underline dark:text-white">hello@solforbs.com</a></dd>
+                            <dt class="text-slate-500">{{ __('Email') }}</dt>
+                            <dd><a href="mailto:hello@solforbs.com" class="font-semibold text-brand-700 hover:underline">hello@solforbs.com</a></dd>
                         </div>
                         <div>
-                            <dt class="text-zinc-500">{{ __('Phone') }}</dt>
-                            <dd><a href="tel:+254759900802" class="font-medium text-zinc-900 hover:underline dark:text-white">+254 759 900 802</a></dd>
+                            <dt class="text-slate-500">{{ __('Phone') }}</dt>
+                            <dd><a href="tel:+254759900802" class="font-semibold text-brand-700 hover:underline">+254 759 900 802</a></dd>
                         </div>
                         <div>
-                            <dt class="text-zinc-500">{{ __('Hours') }}</dt>
-                            <dd class="font-medium text-zinc-900 dark:text-white">{{ __('Mon–Sat, 8am – 7pm EAT') }}</dd>
+                            <dt class="text-slate-500">{{ __('Hours') }}</dt>
+                            <dd class="font-medium text-slate-900">{{ __('Mon–Sat, 8am – 7pm EAT') }}</dd>
                         </div>
                     </dl>
                 </div>
 
-                <div class="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
-                    <h2 class="font-semibold text-zinc-900 dark:text-white">{{ __('Already a customer?') }}</h2>
-                    <p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+                <div class="rounded-2xl border border-brand-100 bg-brand-50 p-6">
+                    <h2 class="font-semibold text-slate-900">{{ __('Already a customer?') }}</h2>
+                    <p class="mt-2 text-sm text-slate-600">
                         {{ __('Sign in and raise it from your dashboard — we will see which ISP you are without asking.') }}
                     </p>
-                    <a href="{{ route('login') }}" wire:navigate class="mt-4 inline-block text-sm font-medium text-zinc-900 underline underline-offset-4 dark:text-white">
+                    <a href="{{ route('login') }}" wire:navigate class="mt-4 inline-block text-sm fe-link">
                         {{ __('Log in') }}
                     </a>
                 </div>

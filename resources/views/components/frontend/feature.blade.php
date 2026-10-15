@@ -5,8 +5,8 @@
 
 {{-- A capability, stated plainly. The icon set is inline rather than a package: three shapes
      do not justify a dependency. --}}
-<div {{ $attributes->class('rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900') }}>
-    <span class="flex size-10 items-center justify-center rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900">
+<div {{ $attributes->class('group relative rounded-2xl border border-slate-200 bg-white p-6 shadow-sm shadow-slate-900/[0.03] transition duration-200 hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-lg hover:shadow-brand-900/[0.07]') }}>
+    <span class="flex size-11 items-center justify-center rounded-xl bg-linear-to-br from-brand-500 to-brand-700 text-white shadow-md shadow-brand-600/25 ring-4 ring-brand-50 transition group-hover:to-mint-500">
         <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">
             @switch($icon)
                 @case('router')
@@ -36,6 +36,6 @@
         </svg>
     </span>
 
-    <h3 class="mt-4 font-semibold text-zinc-900 dark:text-white">{{ $title }}</h3>
-    <p class="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">{{ $slot }}</p>
+    <h3 class="mt-5 font-semibold text-slate-900">{{ $title }}</h3>
+    <p class="mt-2 text-sm leading-relaxed text-slate-600">{{ $slot }}</p>
 </div>

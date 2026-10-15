@@ -15,22 +15,26 @@ new #[Layout('components.layouts.frontend')] #[Title('Sell internet without the 
         :lead="__('Take M-PESA payments at the wifi login page, hand out access automatically, and manage every MikroTik you own from one screen. You pay us a share of what you actually collect.')"
     >
         <x-slot name="actions">
-            <a href="{{ route('register') }}" wire:navigate class="rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200">
+            <a href="{{ route('register') }}" wire:navigate class="fe-btn-mint">
                 {{ __('Open your account') }}
             </a>
-            <a href="{{ route('services') }}#pricing" class="rounded-xl border border-zinc-300 px-6 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-100 dark:border-zinc-700 dark:text-white dark:hover:bg-zinc-800">
+            <a href="{{ route('services') }}#pricing" class="fe-btn-glass">
                 {{ __('See what it costs') }}
             </a>
         </x-slot>
 
         <x-slot name="below">
-            <div class="grid gap-4 sm:grid-cols-3">
-                <x-frontend.stat :value="__('KSh 2,000')" :label="__('One-off setup fee')" />
-                <x-frontend.stat value="3–5%" :label="__('Of what your HotSpot collects')" />
-                <x-frontend.stat :value="__('KSh 15')" :label="__('Per PPPoE subscriber a month')" />
-            </div>
+            <x-frontend.dashboard-preview class="mx-auto max-w-5xl" />
         </x-slot>
     </x-frontend.hero>
+
+    <div class="px-4 pt-12 sm:px-6 sm:pt-16">
+        <div class="mx-auto grid max-w-5xl gap-4 sm:grid-cols-3">
+            <x-frontend.stat :value="__('KSh 2,000')" :label="__('One-off setup fee')" />
+            <x-frontend.stat value="3–5%" :label="__('Of what your HotSpot collects')" />
+            <x-frontend.stat :value="__('KSh 15')" :label="__('Per PPPoE subscriber a month')" />
+        </div>
+    </div>
 
     <x-frontend.section
         tint
@@ -105,8 +109,8 @@ new #[Layout('components.layouts.frontend')] #[Title('Sell internet without the 
             </x-frontend.price-card>
         </div>
 
-        <p class="mt-8 text-center text-sm text-zinc-600 dark:text-zinc-400">
-            <a href="{{ route('services') }}#pricing" class="font-medium underline underline-offset-4 hover:text-zinc-900 dark:hover:text-white">
+        <p class="mt-8 text-center text-sm text-slate-600">
+            <a href="{{ route('services') }}#pricing" class="fe-link">
                 {{ __('See exactly how the bill is worked out') }}
             </a>
         </p>

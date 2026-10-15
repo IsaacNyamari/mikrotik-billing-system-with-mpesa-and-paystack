@@ -23,6 +23,25 @@
     --color-zinc-900: #171717;
     --color-zinc-950: #0a0a0a;
 
+    /* HumSols, sampled from the logo: navy for the lettering, teal for the second figure. */
+    --color-brand-50: #eef5fd;
+    --color-brand-100: #d6e7fa;
+    --color-brand-200: #aecdf3;
+    --color-brand-300: #7aaee9;
+    --color-brand-400: #3f86d8;
+    --color-brand-500: #1a6cc6;
+    --color-brand-600: #0b58ad;
+    --color-brand-700: #09488e;
+    --color-brand-800: #083a72;
+    --color-brand-900: #062c57;
+    --color-brand-950: #041b38;
+    --color-mint-50: #e9fcfa;
+    --color-mint-100: #c6f7f2;
+    --color-mint-300: #5fe9df;
+    --color-mint-400: #00dace;
+    --color-mint-500: #00b8ae;
+    --color-mint-600: #00938b;
+
     --color-accent: var(--color-neutral-800);
     --color-accent-content: var(--color-neutral-800);
     --color-accent-foreground: var(--color-white);
@@ -75,4 +94,29 @@ select:focus[data-flux-control] {
 [data-flux-table] [data-flux-cell] {
     padding-block: 0.75rem;
     padding-inline: 1rem;
+}
+
+/*
+ * The public site's controls. Declared once so a button on the contact page and one in the
+ * hero cannot drift into two shades of the same intention.
+ */
+@layer components {
+    .fe-btn-primary {
+        @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-60 bg-brand-600 text-white shadow-sm shadow-brand-600/30 hover:bg-brand-700 focus-visible:ring-brand-500;
+    }
+    .fe-btn-mint {
+        @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-60 bg-mint-400 text-brand-950 shadow-lg shadow-mint-400/25 hover:bg-mint-300 focus-visible:ring-mint-400;
+    }
+    .fe-btn-outline {
+        @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-60 border border-slate-300 bg-white text-slate-900 hover:border-brand-300 hover:bg-brand-50 focus-visible:ring-brand-500;
+    }
+    .fe-btn-glass {
+        @apply inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-60 border border-white/25 bg-white/5 text-white backdrop-blur hover:bg-white/15 focus-visible:ring-white;
+    }
+    .fe-input {
+        @apply w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-xs outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/15;
+    }
+    .fe-link {
+        @apply font-semibold text-brand-600 underline decoration-brand-200 decoration-2 underline-offset-4 hover:text-brand-700 hover:decoration-brand-500;
+    }
 }
