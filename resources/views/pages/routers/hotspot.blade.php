@@ -273,7 +273,10 @@ new #[Title('HotSpot setup')] class extends Component {
         </form>
 
         @if ($run !== null)
-            <flux:card class="flex flex-col gap-4" @if (($run['status'] ?? null) === 'running') wire:poll.2s="poll" @endif>
+            {{-- The poll sits on a plain element: Blade cannot compile an @if inside a Flux
+                 component's opening tag, and the page failed outright on it. --}}
+            <div @if (($run['status'] ?? null) === 'running') wire:poll.2s="poll" @endif>
+            <flux:card class="flex flex-col gap-4">
                 <flux:heading size="lg">{{ __('Result') }}</flux:heading>
 
                 @if (($run['status'] ?? null) === 'running')
@@ -301,9 +304,12 @@ new #[Title('HotSpot setup')] class extends Component {
                                 <flux:table.row>
                                     <flux:table.cell class="w-56">{{ $line['step'] }}</flux:table.cell>
                                     <flux:table.cell class="w-24">
-                                        <flux:badge size="sm" :color="match ($line['status']) { 'ok' => 'green', 'failed' => 'red', default => 'zinc' }">
-                                            {{ match ($line['status']) { 'ok' => __('done'), 'failed' => __('failed'), default => __('skipped') } }}
-                                        </flux:badge>
+                                        {{-- Looked up rather than matched inline: a match expression's braces inside a
+                                             component attribute compile to PHP that does not parse. One-line @php only —
+                                             this template already uses that form, and Blade misreads the two mixed. --}}
+                                        @php($badgeColor = ['ok' => 'green', 'failed' => 'red'][$line['status']] ?? 'zinc')
+                                        @php($badgeText = ['ok' => __('done'), 'failed' => __('failed')][$line['status']] ?? __('skipped'))
+                                        <flux:badge size="sm" :color="$badgeColor">{{ $badgeText }}</flux:badge>
                                     </flux:table.cell>
                                     <flux:table.cell class="whitespace-normal">{{ $line['detail'] }}</flux:table.cell>
                                 </flux:table.row>
@@ -312,6 +318,7 @@ new #[Title('HotSpot setup')] class extends Component {
                     </flux:table>
                 @endif
             </flux:card>
+            </div>
         @endif
     </div>
 </section>

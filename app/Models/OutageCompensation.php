@@ -30,6 +30,13 @@ class OutageCompensation extends Model
 {
     use BelongsToTenant;
 
+    /**
+     * Named outright: Laravel's inflector counts "compensation" as uncountable, so the table it
+     * would guess is outage_compensation — which does not exist, and every re-login check
+     * failed on it.
+     */
+    protected $table = 'outage_compensations';
+
     public const RELOGIN_PENDING = 'pending';
 
     public const RELOGIN_DONE = 'done';

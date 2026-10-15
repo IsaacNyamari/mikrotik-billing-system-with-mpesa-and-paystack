@@ -7,6 +7,12 @@ use Throwable;
 
 class RouterOsConnectionException extends RuntimeException
 {
+    /**
+     * The router answered and refused the login, as opposed to not answering at all. The one
+     * case a stored administrator login can repair.
+     */
+    public bool $rejectedCredentials = false;
+
     public static function for(string $host, int $port, Throwable $previous): self
     {
         return new self(
@@ -17,6 +23,9 @@ class RouterOsConnectionException extends RuntimeException
 
     public static function badCredentials(string $host): self
     {
-        return new self(sprintf('RouterOS at %s rejected the API credentials.', $host));
+        $exception = new self(sprintf('RouterOS at %s rejected the API credentials.', $host));
+        $exception->rejectedCredentials = true;
+
+        return $exception;
     }
 }

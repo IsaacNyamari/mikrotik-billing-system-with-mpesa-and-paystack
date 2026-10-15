@@ -90,10 +90,16 @@ class RouterSetupScript
         $localSubnet = $this->subnet($options['local_api_subnet'] ?? config('wireguard.local_api_subnet'));
         $portalHost = (string) (parse_url((string) config('app.url'), PHP_URL_HOST) ?: 'localhost');
 
-        // A fresh API password every time a script is generated. The old one stops working
-        // the moment this runs, which is the point: a script that leaked is revoked by
-        // generating another.
-        $apiPassword = $options['api_password'] ?? Str::password(24, symbols: false);
+        // The API password the router already has, unless a new one is asked for. It used to
+        // be replaced on every call, and the router form calls this on every save — so editing
+        // a router's name after pasting its script left the device holding one password and
+        // the platform another, and the tunnel came up to a router that refused to talk.
+        // Rotation is now deliberate: the Rotate keys button asks for it.
+        $apiPassword = $options['api_password'] ?? (
+            filled($router->api_password) && ($options['rotate_api_password'] ?? false) !== true
+                ? (string) $router->api_password
+                : Str::password(24, symbols: false)
+        );
 
         // Remembered so the next visit to this page produces the same script rather than the
         // defaults, and so an operator can regenerate one without re-answering.

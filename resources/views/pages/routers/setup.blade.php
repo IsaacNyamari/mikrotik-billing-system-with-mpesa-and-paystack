@@ -322,6 +322,7 @@ new #[Title('Router setup')] class extends Component {
         app(RouterSetupScript::class)->for($router, [
             'lan_interface' => $this->lanInterface,
             'with_hotspot' => $this->withHotspot,
+            'rotate_api_password' => true,
         ]);
 
         $audit->record(

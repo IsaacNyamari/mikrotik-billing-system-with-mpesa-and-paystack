@@ -20,13 +20,14 @@ class RouterHealthProbe
     public function __construct(
         protected RouterOsConnector $connector,
         protected AuditLogger $audit,
+        protected ApiCredentialRepair $repair,
     ) {}
 
     /**
      * Probe the router and persist the result. Never throws — an unreachable router is an
      * expected outcome that is recorded, not an error that aborts the caller.
      */
-    public function probe(Router $router): Router
+    public function probe(Router $router, bool $repairing = false): Router
     {
         try {
             $connection = $this->connector->connect($router);
@@ -66,6 +67,13 @@ class RouterHealthProbe
 
             return $router;
         } catch (RouterOsConnectionException $e) {
+            // Answered and refused: the router is up, it just holds a different API password.
+            // Put ours back with the administrator login and try once more, rather than
+            // reporting an outage nobody can fix from here.
+            if ($e->rejectedCredentials && ! $repairing && $this->repair->repair($router)) {
+                return $this->probe($router, repairing: true);
+            }
+
             return $this->recordFailure($router, RouterStatus::Offline, $e->getMessage());
         } catch (Throwable $e) {
             // The router answered but something about the exchange was wrong — bad
