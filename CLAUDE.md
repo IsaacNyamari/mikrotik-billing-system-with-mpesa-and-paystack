@@ -785,6 +785,50 @@ Both are pinned to their production defaults in `phpunit.xml`. A laptop that set
 quietly running a different suite from CI, which is how people learn to distrust the tests
 rather than the setting.
 
+## PPPoE billing and SMS
+
+A PPPoE line is billed by its **paid-until date** (`service_accounts.expires_at`), set when the
+line is created or under the row's **Package & paid until** menu on the customer page. Whole
+days and months run to the end of the day, so a line due "on the 5th" works all of the 5th.
+
+`pppoe:billing` runs every five minutes (`PppoeBillingRun`, per tenant):
+
+- **Reminders**: one SMS `remind_days_before` days ahead (default 3, Settings → SMS) and one
+  on the due date. Each is remembered against the expiry date it was for
+  (`reminded_before_for` / `reminded_due_for`), so it goes once per cycle however often the
+  run fires. Texts only go 08:00–20:00 Nairobi time.
+- **Cut at expiry**: an active line past its date is suspended through
+  `ChangeServiceAccountStatus` (secret disabled, session dropped) with
+  `suspended_for_nonpayment = true`, and texted, at night deferred to the morning. Cutting
+  does not wait for daytime.
+- **Catch-up**: a paid renewal whose `applied_at` is still null (router down, process killed)
+  is applied.
+
+**Only a line the system cut is reconnected by a payment.** One an operator suspended by hand
+stays suspended. A `Pending` line goes live with its first payment.
+
+**Paying.** Every reminder carries `ServiceAccount::payUrl()`, the public `pay/{token}` page
+(unauthenticated like the portal: the token resolves the line and tenant, `hydrate()` rebinds).
+It sends an STK prompt through `PaymentCollector::collectRenewal()`, the ISP's own provider,
+so the money lands where every other payment to that ISP does. The operator can also send the
+prompt, a reminder, or record cash (`provider = 'manual'`, `payments.record`) from the
+customer page. `CallbackProcessor::grantAccess()` sends any payment with a
+`service_account_id` to `ServiceAccountRenewal::renew()` instead of issuing a HotSpot login.
+`renew()` is idempotent (`applied_at`, a cache lock, a row lock): it extends from the current
+expiry if still running, else from now, reconnects, and texts a receipt.
+
+**SMS is HostPinnacle** (`itsmurumba/laravel-hostpinnacle`, SaaS mode left off) behind
+`SmsSender`. The ISP's own account (`sms_settings`, password and API key encrypted, sender ID
+theirs) is used first, then the platform's (`HOSTPINNACLE_*` in the environment), else the
+message is recorded `skipped`. Every attempt is an `sms_messages` row, shown on Settings → SMS.
+`SmsSender` never throws: texting is a courtesy around billing, never a reason a renewal fails.
+
+**Till-only M-PESA** (`DarajaCredentials`) now signs with the platform's Daraja app from
+Platform admin → Platform payments (`PlatformTill::configuration()`, environment as
+fallback), not `config('platform.mpesa.*')`. Safaricom still has to authorise the ISP's till
+as `PartyB` for the platform's shortcode; until it does, those ISPs use their own Daraja keys
+or Paystack.
+
 ## The platform's own business
 
 The ISPs are the customers. What they pay for the platform is modelled separately from what
