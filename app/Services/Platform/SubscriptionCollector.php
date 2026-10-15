@@ -4,6 +4,7 @@ namespace App\Services\Platform;
 
 use App\Enums\PaymentProvider;
 use App\Enums\PaymentStatus;
+use App\Models\PlatformPaymentSetting;
 use App\Models\TenantInvoice;
 use App\Models\TenantPayment;
 use App\Services\Mpesa\Contracts\MpesaGateway;
@@ -39,34 +40,71 @@ class SubscriptionCollector
         return $this->paystack->isConfigured() || $this->till->isConfigured();
     }
 
+    /**
+     * Said to an ISP looking at a bill they cannot pay online. No setting names: they have no
+     * access to any of it, and the platform's owner sees how to fix it on their own page.
+     */
     public function unconfiguredReason(): ?string
     {
-        return $this->isConfigured() ? null : $this->till->unconfiguredReason();
+        if ($this->isConfigured()) {
+            return null;
+        }
+
+        return __('Online payment is not available yet. Contact the platform to settle this invoice.');
     }
 
     /**
-     * Prompt the payer's phone for this invoice.
+     * The ways an ISP can pay right now, in the platform's order of preference.
      *
-     * Paystack first where it is set up: it needs no Safaricom paperwork of its own, and the
-     * ISP sees the same prompt either way.
+     * @return array<string, string> provider => label
      */
-    public function collect(TenantInvoice $invoice, string $phone): TenantPayment
+    public function availableProviders(): array
+    {
+        $providers = [];
+
+        if ($this->till->isConfigured()) {
+            $providers[PaymentProvider::Mpesa->value] = 'M-PESA';
+        }
+
+        if ($this->paystack->isConfigured()) {
+            $providers[PaymentProvider::Paystack->value] = __('Paystack (M-PESA and Airtel Money)');
+        }
+
+        $preferred = PlatformPaymentSetting::current()->preferred_provider;
+
+        if (is_string($preferred) && isset($providers[$preferred])) {
+            $providers = [$preferred => $providers[$preferred]] + $providers;
+        }
+
+        return $providers;
+    }
+
+    /**
+     * Prompt the payer's phone for this invoice, through the provider they chose if it is
+     * available, the platform's preferred one otherwise.
+     */
+    public function collect(TenantInvoice $invoice, string $phone, ?string $provider = null): TenantPayment
     {
         $normalised = PhoneNumber::normalise($phone);
+        $available = $this->availableProviders();
+
+        $provider = is_string($provider) && isset($available[$provider])
+            ? $provider
+            : (string) array_key_first($available);
 
         // Recorded before the prompt goes out, so an ISP that pays against a request we failed
         // to record cannot happen.
         $payment = TenantPayment::query()->create([
             'tenant_id' => $invoice->tenant_id,
             'tenant_invoice_id' => $invoice->id,
-            'provider' => $this->paystack->isConfigured()
+            'provider' => $provider === PaymentProvider::Paystack->value
                 ? PaymentProvider::Paystack->value
                 : PaymentProvider::Mpesa->value,
             'phone' => $normalised,
             'amount' => $invoice->total,
         ]);
 
-        return $this->paystack->isConfigured()
+        return $provider === PaymentProvider::Paystack->value
             ? $this->collectWithPaystack($invoice, $payment, $normalised)
             : $this->collectWithDaraja($invoice, $payment, $normalised);
     }

@@ -29,13 +29,58 @@ new #[Title('Subscription')] class extends Component {
 
     public string $phone = '';
 
+    /** mpesa or paystack — which prompt to send, when the platform offers both. */
+    public string $provider = '';
+
+    /** The invoice chosen from the table, when it is not the one due next. */
+    #[Locked]
+    public ?int $selectedInvoiceId = null;
+
     public function mount(): void
     {
         // Nothing here is another ISP's: every read below is filtered by the bound tenant,
         // and a super admin who has not switched into an ISP has no bill of their own.
         if (Tenancy::id() !== null) {
             TenantSubscription::forTenant(Tenancy::tenant());
+
+            // The number the ISP gave us, so paying is one tap for most of them.
+            $this->phone = (string) Tenancy::tenant()->contact_phone;
         }
+
+        $this->provider = (string) array_key_first(app(SubscriptionCollector::class)->availableProviders());
+    }
+
+    /**
+     * The ways this ISP can pay right now, offered first in the platform's preferred order.
+     *
+     * @return array<string, string>
+     */
+    #[Computed]
+    public function providers(): array
+    {
+        return app(SubscriptionCollector::class)->availableProviders();
+    }
+
+    /**
+     * Pay a particular invoice from the list, not only the one due next.
+     */
+    public function choose(int $invoiceId): void
+    {
+        $invoice = TenantInvoice::query()
+            ->where('tenant_id', Tenancy::id())
+            ->outstanding()
+            ->find($invoiceId);
+
+        // Only this ISP's own, and only one still owed: an id typed into the wire cannot pay
+        // somebody else's bill or settle one twice.
+        if ($invoice === null) {
+            return;
+        }
+
+        $this->selectedInvoiceId = $invoice->id;
+        $this->reset(['paymentId', 'payingInvoiceId']);
+
+        unset($this->dueInvoice, $this->payment);
     }
 
     #[Computed]
@@ -45,13 +90,25 @@ new #[Title('Subscription')] class extends Component {
     }
 
     /**
-     * The bill to settle next: the setup fee first, then the oldest unpaid month.
+     * The bill to settle: the one chosen from the list, otherwise the setup fee first and then
+     * the oldest unpaid month.
      */
     #[Computed]
     public function dueInvoice(): ?TenantInvoice
     {
         if (Tenancy::id() === null) {
             return null;
+        }
+
+        if ($this->selectedInvoiceId !== null) {
+            $chosen = TenantInvoice::query()
+                ->where('tenant_id', Tenancy::id())
+                ->outstanding()
+                ->find($this->selectedInvoiceId);
+
+            if ($chosen !== null) {
+                return $chosen;
+            }
         }
 
         $subscription = $this->subscription;
@@ -130,11 +187,12 @@ new #[Title('Subscription')] class extends Component {
 
         $validated = $this->validate([
             'phone' => ['required', 'string', 'regex:/^(?:\+?254|0)?7\d{8}$|^(?:\+?254|0)?1\d{8}$/'],
+            'provider' => ['nullable', 'in:'.implode(',', array_keys($this->providers))],
         ], [
-            'phone.regex' => __('Enter a Safaricom number like 07XX XXX XXX.'),
+            'phone.regex' => __('Enter a mobile number like 07XX XXX XXX.'),
         ]);
 
-        $payment = $collector->collect($invoice, $validated['phone']);
+        $payment = $collector->collect($invoice, $validated['phone'], $validated['provider'] ?? null);
 
         $this->paymentId = $payment->id;
         $this->payingInvoiceId = $invoice->id;
@@ -179,7 +237,7 @@ new #[Title('Subscription')] class extends Component {
 
     public function startOver(): void
     {
-        $this->reset(['paymentId', 'payingInvoiceId']);
+        $this->reset(['paymentId', 'payingInvoiceId', 'selectedInvoiceId']);
 
         unset($this->payment, $this->subscription, $this->dueInvoice, $this->invoices);
     }
@@ -254,9 +312,10 @@ new #[Title('Subscription')] class extends Component {
                 <flux:card class="flex flex-col gap-3" wire:poll.3s="checkPayment">
                     <flux:heading size="lg">{{ __('Check your phone') }}</flux:heading>
                     <flux:text>
-                        {{ __('Enter your M-PESA PIN to pay :currency :amount. This page updates by itself.', [
+                        {{ __('A prompt for :currency :amount is on :phone. Enter your PIN to approve it. This page updates by itself.', [
                             'currency' => $this->currency,
                             'amount' => number_format((float) $this->payment->amount, 2),
+                            'phone' => $this->payment->phone,
                         ]) }}
                     </flux:text>
                 </flux:card>
@@ -324,10 +383,17 @@ new #[Title('Subscription')] class extends Component {
                             <flux:input
                                 wire:model="phone"
                                 type="tel"
-                                :label="__('M-PESA number to charge')"
+                                :label="__('Phone number to charge')"
                                 placeholder="07XX XXX XXX"
                                 class="sm:max-w-xs"
                             />
+                            @if (count($this->providers) > 1)
+                                <flux:select wire:model="provider" :label="__('Pay with')" class="sm:max-w-xs">
+                                    @foreach ($this->providers as $key => $label)
+                                        <flux:select.option :value="$key">{{ $label }}</flux:select.option>
+                                    @endforeach
+                                </flux:select>
+                            @endif
                             <flux:button variant="primary" type="submit" wire:loading.attr="disabled" wire:target="pay">
                                 <span wire:loading.remove wire:target="pay">
                                     {{ __('Pay :currency :amount', ['currency' => $this->currency, 'amount' => number_format((float) $invoice->total, 0)]) }}
@@ -389,6 +455,7 @@ new #[Title('Subscription')] class extends Component {
                             <flux:table.column>{{ __('Due') }}</flux:table.column>
                             <flux:table.column align="end">{{ __('Amount') }}</flux:table.column>
                             <flux:table.column>{{ __('Status') }}</flux:table.column>
+                            <flux:table.column />
                         </flux:table.columns>
 
                         <flux:table.rows>
@@ -400,6 +467,14 @@ new #[Title('Subscription')] class extends Component {
                                     <flux:table.cell align="end">{{ number_format((float) $row->total, 2) }}</flux:table.cell>
                                     <flux:table.cell>
                                         <flux:badge size="sm" :color="$row->status->color()">{{ $row->status->label() }}</flux:badge>
+                                    </flux:table.cell>
+                                    <flux:table.cell align="end">
+                                        @if ($row->status->isOutstanding() && $this->providers !== [])
+                                            <flux:button size="sm" variant="primary" icon="device-phone-mobile" wire:click="choose({{ $row->id }})"
+                                                x-on:click="$nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' }))">
+                                                {{ __('Pay') }}
+                                            </flux:button>
+                                        @endif
                                     </flux:table.cell>
                                 </flux:table.row>
                             @endforeach

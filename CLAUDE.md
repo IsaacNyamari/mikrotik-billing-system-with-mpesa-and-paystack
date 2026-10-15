@@ -829,7 +829,13 @@ Three things it deliberately never touches:
 `billing:run` raises invoices nightly rather than monthly: a scheduler that missed the first of
 the month would skip a month's income, and raising one that already exists does nothing.
 
-The platform's own M-PESA credentials live in `config/platform.php` from the environment, not
+**The platform's own collection is set in the dashboard** (Platform admin → Platform payments,
+`platform_payment_settings`, one row, secrets encrypted and write-only). M-PESA (Daraja, paybill
+or till), Paystack, or both, with a preferred one. The environment (`PLATFORM_MPESA_*`,
+`PLATFORM_PAYSTACK_*`) is only a fallback. An ISP picks any unpaid invoice on Subscription,
+chooses the provider and gets a prompt; nothing an ISP sees ever names a setting or a file.
+
+Originally the platform's own M-PESA credentials lived in `config/platform.php` from the environment, not
 in `mpesa_configurations` — there is one set for the whole installation, and it collects *from*
 ISPs rather than for them. It is handed to the proven Daraja gateway as an unsaved
 `MpesaConfiguration`, and it has its own callback route and token because the tenant callback

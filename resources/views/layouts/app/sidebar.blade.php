@@ -105,7 +105,8 @@
                 @if ($user->isSuperAdmin())
                     <flux:sidebar.group class="grid">
                         <div class="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 in-data-flux-sidebar-collapsed-desktop:hidden dark:text-zinc-500">{{ __('Platform admin') }}</div>
-                        <flux:sidebar.item icon="building-office-2" :href="route('platform.subscriptions')" :current="request()->routeIs('platform.*')" wire:navigate>{{ __('ISP subscriptions') }}</flux:sidebar.item>
+                        <flux:sidebar.item icon="building-office-2" :href="route('platform.subscriptions')" :current="request()->routeIs('platform.subscriptions')" wire:navigate>{{ __('ISP subscriptions') }}</flux:sidebar.item>
+                        <flux:sidebar.item icon="credit-card" :href="route('platform.payments')" :current="request()->routeIs('platform.payments')" wire:navigate>{{ __('Platform payments') }}</flux:sidebar.item>
                     </flux:sidebar.group>
                 @endif
             </flux:sidebar.nav>

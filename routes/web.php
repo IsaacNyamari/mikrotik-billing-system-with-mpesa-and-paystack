@@ -113,6 +113,7 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
     // Runs the platform's own billing. Guarded inside the component too — a route name is not
     // an authorization check.
     Route::livewire('platform/subscriptions', 'pages::platform.subscriptions')->name('platform.subscriptions');
+    Route::livewire('platform/payments', 'pages::platform.payments')->name('platform.payments');
 
     Route::livewire('reports/earnings', 'pages::reports.earnings')->name('reports.earnings');
     Route::livewire('settings/mpesa', 'pages::settings.mpesa')->name('settings.mpesa');
