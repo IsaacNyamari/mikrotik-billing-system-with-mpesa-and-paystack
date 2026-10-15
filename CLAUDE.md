@@ -269,6 +269,13 @@ payment providers, fasttrack removed, and the login pages fetched onto the devic
 - Refuses the uplink, the tunnel, a port that is in a bridge (offer the bridge), an
   interface that already has another DHCP server or HotSpot, and a public address range.
 - A gateway in the middle of the network gives a pool of two ranges around it.
+- **A Wi-Fi name** switches the radio on (open, `platform-open` / empty auth) and bridges it
+  with the chosen port in `bridge-hotspot`, where the HotSpot then runs. Either radio package
+  is driven; `bridge-tech` is never offered.
+- **The HotSpot's network is removed from every interface first** (production, 2026-10-15:
+  `10.10.10.1` left on `bridge-tech` while DHCP and the HotSpot ran on wlan1 made both
+  `invalid`, and phones sat on "obtaining IP address"). An address in that network belonging
+  to the technician port, tunnel or uplink is refused instead.
 - Saves what it built into `setup_options`, so the setup script and the wizard agree.
 
 ## Outages, compensation and logging back in
