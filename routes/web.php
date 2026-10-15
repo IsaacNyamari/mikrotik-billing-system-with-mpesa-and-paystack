@@ -79,6 +79,9 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
     // to do it over. Carried by a person and pasted into the device.
     Route::livewire('routers/{router}/setup', 'pages::routers.setup')->name('routers.setup');
 
+    // The device's own configuration, menu by menu — what an ISP would otherwise open Winbox for.
+    Route::livewire('routers/{router}/console/{menu?}', 'pages::routers.console')->name('routers.console');
+
     Route::livewire('plans', 'pages::plans.index')->name('plans.index');
     Route::livewire('plans/create', 'pages::plans.form')->name('plans.create');
     Route::livewire('plans/{plan}/edit', 'pages::plans.form')->name('plans.edit');

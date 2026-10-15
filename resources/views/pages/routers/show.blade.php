@@ -138,6 +138,10 @@ new #[Title('Router')] class extends Component {
                     </flux:button>
                 @endcan
 
+                <flux:button icon="squares-2x2" :href="route('routers.console', $router)" wire:navigate>
+                    {{ __('Console') }}
+                </flux:button>
+
                 @can('provision', $router)
                     <flux:button icon="command-line" :href="route('routers.setup', $router)" wire:navigate>
                         {{ __('Setup script') }}
