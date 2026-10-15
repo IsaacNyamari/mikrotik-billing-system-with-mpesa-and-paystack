@@ -37,13 +37,16 @@ class HotspotInstaller
 
     public const STEP_SKIPPED = 'skipped';
 
+    /** The bridge customers' ports and wifi share, matching the setup script's name for it. */
+    public const BRIDGE = 'bridge-hotspot';
+
     public function __construct(
         protected RouterOsConnector $connector,
         protected AuditLogger $audit,
     ) {}
 
     /**
-     * @param  array{interface: string, address: string, pool: string, dns_servers: string, dns_name: string, masquerade: bool, name: string}  $setup
+     * @param  array{interface: string, address: string, pool: string, dns_servers: string, dns_name: string, masquerade: bool, name: string, wifi_name?: string}  $setup
      * @return array<int, array{step: string, status: string, detail: string}>
      */
     public function install(Router $router, array $setup): array
@@ -57,15 +60,43 @@ class HotspotInstaller
             return [['step' => __('Connect to the router'), 'status' => self::STEP_FAILED, 'detail' => $e->getMessage()]];
         }
 
+        // Closures over $plan by reference, not arrow functions: the bridge step moves the
+        // HotSpot from the chosen port onto the customer bridge, and every step after it has
+        // to build on the bridge.
         $core = [
-            __('HotSpot interface') => fn () => $this->checkInterface($connection, $router, $plan),
-            __('Local address of network') => fn () => $this->address($connection, $plan),
-            __('Address pool') => fn () => $this->pool($connection, $plan),
-            __('DHCP server') => fn () => $this->dhcp($connection, $plan),
-            __('DNS servers') => fn () => $this->dns($connection, $plan),
-            __('HotSpot server profile') => fn () => $this->profile($connection, $plan),
-            __('HotSpot server') => fn () => $this->server($connection, $plan),
-            __('Masquerade network') => fn () => $this->masquerade($connection, $plan),
+            __('HotSpot interface') => function () use ($connection, $router, &$plan) {
+                return $this->checkInterface($connection, $router, $plan);
+            },
+            __('Previous HotSpot taken down') => function () use ($connection, &$plan) {
+                return $this->clearPrevious($connection, $plan);
+            },
+            __('Customer bridge') => function () use ($connection, &$plan) {
+                return $this->bridge($connection, $plan);
+            },
+            __('Wi-Fi') => function () use ($connection, &$plan) {
+                return $this->wifi($connection, $plan);
+            },
+            __('Local address of network') => function () use ($connection, &$plan) {
+                return $this->address($connection, $plan);
+            },
+            __('Address pool') => function () use ($connection, &$plan) {
+                return $this->pool($connection, $plan);
+            },
+            __('DHCP server') => function () use ($connection, &$plan) {
+                return $this->dhcp($connection, $plan);
+            },
+            __('DNS servers') => function () use ($connection, &$plan) {
+                return $this->dns($connection, $plan);
+            },
+            __('HotSpot server profile') => function () use ($connection, &$plan) {
+                return $this->profile($connection, $plan);
+            },
+            __('HotSpot server') => function () use ($connection, &$plan) {
+                return $this->server($connection, $plan);
+            },
+            __('Masquerade network') => function () use ($connection, &$plan) {
+                return $this->masquerade($connection, $plan);
+            },
         ];
 
         $failed = false;
@@ -113,8 +144,8 @@ class HotspotInstaller
     /**
      * Everything the steps need, worked out and checked once.
      *
-     * @param  array{interface: string, address: string, pool: string, dns_servers: string, dns_name: string, masquerade: bool, name: string}  $setup
-     * @return array{interface: string, address: string, gateway: string, network: string, prefix: int, pool: string, pool_name: string, previous_interface: string, dns_servers: string, dns_name: string, masquerade: bool, name: string, profile: string, dhcp: string}
+     * @param  array{interface: string, address: string, pool: string, dns_servers: string, dns_name: string, masquerade: bool, name: string, wifi_name?: string}  $setup
+     * @return array{interface: string, port: string, address: string, gateway: string, network: string, prefix: int, pool: string, pool_name: string, previous_interface: string, dns_servers: string, dns_name: string, masquerade: bool, name: string, profile: string, dhcp: string, wifi_name: string}
      *
      * @throws InvalidArgumentException
      */
@@ -161,6 +192,10 @@ class HotspotInstaller
 
         return [
             'interface' => $interface,
+            // What was chosen, kept apart from where the HotSpot ends up: with Wi-Fi the HotSpot
+            // runs on the customer bridge, and the port is one member of it.
+            'port' => $interface,
+            'wifi_name' => self::wifiName((string) ($setup['wifi_name'] ?? '')),
             'address' => $gateway.'/'.$prefix,
             'gateway' => $gateway,
             'network' => $network,
@@ -231,6 +266,12 @@ class HotspotInstaller
             throw new InvalidArgumentException(__(':interface is the management tunnel.', ['interface' => $plan['interface']]));
         }
 
+        // The technician's way in. A HotSpot on it would put the one port that always works
+        // behind a payment page.
+        if ($plan['interface'] === 'bridge-tech') {
+            throw new InvalidArgumentException(__('bridge-tech is the technician port, kept free so the router can always be reached. Choose the customer port instead.'));
+        }
+
         $row = $connection->first('/interface', ['name' => $plan['interface']]);
 
         if ($row === null) {
@@ -241,11 +282,158 @@ class HotspotInstaller
         // bridge does. Building a HotSpot on the port would look right and hand out nothing.
         $port = $connection->first('/interface/bridge/port', ['interface' => $plan['interface']]);
 
-        if ($port !== null) {
+        // Our own customer bridge is the exception: the port was put there by an earlier run,
+        // and choosing it again means "this HotSpot", which the bridge step picks up.
+        if ($port !== null && ($port['bridge'] ?? '') !== self::BRIDGE) {
             throw new InvalidArgumentException(__(':interface is a port of :bridge. Choose :bridge instead.', ['interface' => $plan['interface'], 'bridge' => $port['bridge'] ?? 'its bridge']));
         }
 
         return __(':interface (:type)', ['interface' => $plan['interface'], 'type' => $row['type'] ?? 'interface']);
+    }
+
+    /**
+     * A wifi name as RouterOS and phones will take it: printable, no quotes, 32 bytes at most.
+     * Empty means "leave the wifi alone".
+     */
+    public static function wifiName(string $value): string
+    {
+        $name = trim((string) preg_replace("/[^A-Za-z0-9 _\-.'&+()]/", '', $value));
+
+        return mb_strimwidth($name, 0, 32);
+    }
+
+    /**
+     * What the last run built comes down before anything is rebuilt, so moving the HotSpot
+     * from a port onto the bridge never leaves a server or a DHCP server on the old port.
+     *
+     * @param  array<string, mixed>  $plan
+     */
+    protected function clearPrevious(RouterOsConnection $connection, array $plan): string
+    {
+        $this->dropDhcp($connection, $plan);
+
+        return __('Nothing left over from before');
+    }
+
+    /**
+     * Put the chosen port and the radio in one bridge, so cable and wifi customers are one
+     * network behind one HotSpot.
+     *
+     * Only with a Wi-Fi name. Without one the HotSpot runs on the chosen interface alone, as
+     * it always did. A board with no radio gets the same, with a line saying so.
+     *
+     * @param  array<string, mixed>  $plan
+     */
+    protected function bridge(RouterOsConnection $connection, array &$plan): string
+    {
+        if ($plan['wifi_name'] === '') {
+            return __('Not needed: the HotSpot runs on :interface alone.', ['interface' => $plan['interface']]);
+        }
+
+        $radios = array_column($this->radios($connection)['rows'], 'name');
+
+        if ($radios === []) {
+            return __('This router has no wifi radio, so the HotSpot runs on :interface alone.', ['interface' => $plan['interface']]);
+        }
+
+        $chosen = $connection->first('/interface', ['name' => $plan['interface']]);
+        $isBridge = ($chosen['type'] ?? '') === 'bridge';
+        $bridge = $isBridge ? (string) $plan['interface'] : self::BRIDGE;
+
+        if (! $isBridge && $connection->first('/interface/bridge', ['name' => $bridge]) === null) {
+            $connection->add('/interface/bridge', ['name' => $bridge, 'comment' => 'HotSpot: customer ports and wifi']);
+        }
+
+        $members = $isBridge || $plan['interface'] === $bridge ? $radios : [$plan['interface'], ...$radios];
+
+        foreach (array_unique($members) as $member) {
+            if ($member === $bridge) {
+                continue;
+            }
+
+            // Out of whatever bridge it was in first: a port in two bridges is not a thing
+            // RouterOS allows, and the technician bridge must keep its own ports.
+            foreach ($connection->get('/interface/bridge/port', ['interface' => $member]) as $row) {
+                $connection->remove('/interface/bridge/port', $row['.id']);
+            }
+
+            $connection->add('/interface/bridge/port', ['bridge' => $bridge, 'interface' => $member]);
+        }
+
+        $plan['interface'] = $bridge;
+
+        return __(':bridge: :members', ['bridge' => $bridge, 'members' => implode(', ', array_unique($members))]);
+    }
+
+    /**
+     * Switch the radio on as an open network under the name given.
+     *
+     * Open on purpose: the HotSpot is what checks who someone is, and a wifi password would
+     * turn a customer away before they could pay. Two radio stacks exist and their commands
+     * differ; the router is asked which it has rather than told.
+     *
+     * @param  array<string, mixed>  $plan
+     */
+    protected function wifi(RouterOsConnection $connection, array $plan): string
+    {
+        if ($plan['wifi_name'] === '') {
+            return __('Not changed: no Wi-Fi name given.');
+        }
+
+        ['stack' => $stack, 'rows' => $rows] = $this->radios($connection);
+
+        if ($rows === []) {
+            return __('This router has no wifi radio.');
+        }
+
+        if ($stack === 'wireless') {
+            if ($connection->first('/interface/wireless/security-profiles', ['name' => 'platform-open']) === null) {
+                $connection->add('/interface/wireless/security-profiles', ['name' => 'platform-open', 'mode' => 'none']);
+            }
+
+            foreach ($rows as $radio) {
+                $connection->update('/interface/wireless', $radio['.id'], [
+                    'ssid' => $plan['wifi_name'],
+                    'mode' => 'ap-bridge',
+                    'security-profile' => 'platform-open',
+                    'disabled' => 'no',
+                ]);
+            }
+        } else {
+            foreach ($rows as $radio) {
+                $connection->update('/interface/wifi', $radio['.id'], [
+                    'configuration.ssid' => $plan['wifi_name'],
+                    'configuration.mode' => 'ap',
+                    'security.authentication-types' => '',
+                    'disabled' => 'no',
+                ]);
+            }
+        }
+
+        return __('":name", open, on :radios', ['name' => $plan['wifi_name'], 'radios' => implode(', ', array_column($rows, 'name'))]);
+    }
+
+    /**
+     * The radios this board has, and which RouterOS package drives them. A board lacks the
+     * other package's menu entirely, which the API reports as an error — so each is tried.
+     *
+     * @return array{stack: string, rows: array<int, array<string, string>>}
+     */
+    protected function radios(RouterOsConnection $connection): array
+    {
+        foreach (['wireless' => '/interface/wireless', 'wifi' => '/interface/wifi'] as $stack => $menu) {
+            try {
+                $rows = $connection->get($menu);
+            } catch (Throwable) {
+                continue;
+            }
+
+            if ($rows !== []) {
+                return ['stack' => $stack, 'rows' => $rows];
+            }
+        }
+
+        return ['stack' => '', 'rows' => []];
     }
 
     /**
@@ -256,7 +444,7 @@ class HotspotInstaller
         // Only the gateway this HotSpot had before — on this interface, or the one it is
         // moving from. Another HotSpot's gateway on another port is not ours to take away.
         foreach ($connection->get('/ip/address', ['comment' => 'HotSpot gateway']) as $row) {
-            if (in_array($row['interface'] ?? '', [$plan['interface'], $plan['previous_interface']], true)) {
+            if (in_array($row['interface'] ?? '', [$plan['interface'], $plan['previous_interface'], $plan['port']], true)) {
                 $connection->remove('/ip/address', $row['.id']);
             }
         }
@@ -543,8 +731,16 @@ class HotspotInstaller
      */
     protected function remember(Router $router, array $plan): void
     {
-        $router->setup_options = array_merge($router->setup_options ?? [], [
-            'lan_interface' => $plan['interface'],
+        $bridged = $plan['interface'] === self::BRIDGE;
+
+        // In the setup script's own terms — the customer port, the bridge it sits in, the
+        // radio and its name — so a later wipe-and-rebuild script builds the same HotSpot.
+        $router->setup_options = array_merge($router->setup_options ?? [], $bridged ? [
+            'bridge_name' => self::BRIDGE,
+            'with_wireless' => true,
+            'ssid' => $plan['wifi_name'],
+        ] : [], [
+            'lan_interface' => $bridged ? $plan['port'] : $plan['interface'],
             'hotspot_name' => $plan['name'],
             'pool_name' => $plan['pool_name'],
             'hotspot_network' => $plan['network'],

@@ -39,6 +39,9 @@ new #[Title('HotSpot setup')] class extends Component {
 
     public string $name = 'billing-hotspot';
 
+    /** The wifi customers join. Empty leaves the radio alone and the HotSpot on the port. */
+    public string $wifiName = '';
+
     public function mount(Router $router): void
     {
         Gate::authorize('provision', $router);
@@ -56,6 +59,9 @@ new #[Title('HotSpot setup')] class extends Component {
         $this->pool = (string) ($options['hotspot_pool'] ?? HotspotInstaller::defaultPool($gateway, (int) $prefix));
         $this->dnsServers = (string) ($options['hotspot_dns_servers'] ?? '1.1.1.1,8.8.8.8');
         $this->dnsName = (string) ($options['hotspot_dns_name'] ?? '');
+        // What customers will look for in their phone's wifi list: the ISP's own name, unless
+        // one was chosen before.
+        $this->wifiName = HotspotInstaller::wifiName((string) ($options['ssid'] ?? \App\Models\PortalSetting::current()->displayName($router->tenant)));
     }
 
     public function updatedAddress(): void
@@ -93,7 +99,7 @@ new #[Title('HotSpot setup')] class extends Component {
         }
 
         $options = $this->router->setupOptions();
-        $excluded = array_filter([$options['wan_interface'] ?? null, $options['interface_name'] ?? null]);
+        $excluded = array_filter([$options['wan_interface'] ?? null, $options['interface_name'] ?? null, 'bridge-tech']);
 
         $usable = array_values(array_filter($interfaces, fn (array $row): bool => ! in_array($row['name'] ?? '', $excluded, true)
             && ! in_array($row['name'] ?? '', $bridged, true)
@@ -125,6 +131,7 @@ new #[Title('HotSpot setup')] class extends Component {
             'dnsServers' => ['required', 'regex:/^[0-9.,\s]+$/'],
             'dnsName' => ['nullable', 'max:128'],
             'name' => ['required', 'regex:/^[A-Za-z0-9][A-Za-z0-9._\-]*$/', 'max:40'],
+            'wifiName' => ['nullable', 'string', 'max:32', "regex:/^[A-Za-z0-9 _\-.'&+()]*$/"],
         ]);
 
         $setup = [
@@ -135,6 +142,7 @@ new #[Title('HotSpot setup')] class extends Component {
             'dns_name' => $this->dnsName,
             'masquerade' => $this->masquerade,
             'name' => $this->name,
+            'wifi_name' => $this->wifiName,
         ];
 
         // Checked here as well as in the job, so a mistake is shown beside the field rather
@@ -217,6 +225,17 @@ new #[Title('HotSpot setup')] class extends Component {
                     @endif
                 </flux:select>
                 <flux:error name="interface" />
+            </flux:card>
+
+            <flux:card class="flex flex-col gap-5">
+                <div>
+                    <flux:heading size="lg">{{ __('Wi-Fi') }}</flux:heading>
+                    <flux:subheading>{{ __('The network customers join on their phones. It is open on purpose: the payment page is what lets them online, and a wifi password would turn them away before they could pay.') }}</flux:subheading>
+                </div>
+
+                <flux:input wire:model="wifiName" :label="__('Wi-Fi name')" maxlength="32"
+                    :description="__('Switches the router\'s radio on and joins it to the HotSpot with the interface above, so cable and wifi customers both see the payment page. Leave empty to keep the HotSpot on the cable only.')" />
+                <flux:error name="wifiName" />
             </flux:card>
 
             <flux:card class="flex flex-col gap-5">
