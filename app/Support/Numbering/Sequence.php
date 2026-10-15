@@ -12,12 +12,14 @@ enum Sequence
 {
     case Customer;
     case ServiceAccount;
+    case CustomerInvoice;
 
     public function table(): string
     {
         return match ($this) {
             self::Customer => 'customers',
             self::ServiceAccount => 'service_accounts',
+            self::CustomerInvoice => 'customer_invoices',
         };
     }
 
@@ -26,6 +28,7 @@ enum Sequence
         return match ($this) {
             self::Customer => 'customer_number',
             self::ServiceAccount => 'account_number',
+            self::CustomerInvoice => 'number',
         };
     }
 
@@ -34,6 +37,7 @@ enum Sequence
         return match ($this) {
             self::Customer => 'CUS',
             self::ServiceAccount => 'SVC',
+            self::CustomerInvoice => 'INV',
         };
     }
 
@@ -48,6 +52,7 @@ enum Sequence
         return match ($this) {
             self::Customer => 'LENGTH(customer_number) DESC, customer_number DESC',
             self::ServiceAccount => 'LENGTH(account_number) DESC, account_number DESC',
+            self::CustomerInvoice => 'LENGTH(number) DESC, number DESC',
         };
     }
 }

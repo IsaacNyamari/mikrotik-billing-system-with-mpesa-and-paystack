@@ -10,6 +10,8 @@ use App\Models\Plan;
 use App\Models\Router;
 use App\Models\ServiceAccount;
 use App\Services\Billing\BillingMessages;
+use App\Services\Billing\CustomerInvoices;
+use App\Models\CustomerInvoice;
 use App\Services\Billing\ServiceAccountRenewal;
 use App\Services\Mpesa\PaymentCollector;
 use App\Services\RouterOs\PppoeSecretProvisioner;
@@ -107,7 +109,7 @@ new #[Title('Customer')] class extends Component {
      * Moving the date forward on a line the system cut for non-payment reconnects it — that is
      * what an operator who has just taken cash at the counter means by it.
      */
-    public function saveBilling(ChangeServiceAccountStatus $change, PppoeSecretProvisioner $pppoe): void
+    public function saveBilling(ChangeServiceAccountStatus $change, PppoeSecretProvisioner $pppoe, CustomerInvoices $invoices): void
     {
         $account = $this->customer->serviceAccounts()->findOrFail((int) $this->billingAccountId);
 
@@ -130,6 +132,12 @@ new #[Title('Customer')] class extends Component {
         $account->router_id = (int) $validated['billingRouterId'];
 
         if ($expires?->toDateString() !== $account->expires_at?->toDateString()) {
+            // Moving the date forward by hand settles the period some other way, so bills for
+            // the time just given stop standing against the subscriber.
+            if ($expires !== null && ($account->expires_at === null || $expires->greaterThan($account->expires_at))) {
+                $invoices->voidOutstandingBefore($account, $expires, __('Paid-until date moved to :date by hand', ['date' => $expires->toDateString()]));
+            }
+
             $account->expires_at = $expires;
             $account->reminded_before_for = null;
             $account->reminded_due_for = null;
@@ -147,7 +155,7 @@ new #[Title('Customer')] class extends Component {
             $pppoe->push($account);
         }
 
-        unset($this->serviceAccounts, $this->billingAccount);
+        unset($this->serviceAccounts, $this->billingAccount, $this->invoices);
 
         Flux::modal('edit-billing')->close();
         Flux::toast(variant: 'success', text: __('Billing saved.'));
@@ -215,9 +223,44 @@ new #[Title('Customer')] class extends Component {
 
         $renewal->recordManual($account);
 
-        unset($this->serviceAccounts);
+        unset($this->serviceAccounts, $this->invoices);
 
         Flux::toast(variant: 'success', text: __('Payment recorded. The line is paid until :date.', ['date' => $account->refresh()->expires_at?->format('j M Y')]));
+    }
+
+    /**
+     * This customer's bills across all their lines, newest first.
+     *
+     * @return Collection<int, CustomerInvoice>
+     */
+    #[Computed]
+    public function invoices(): Collection
+    {
+        return CustomerInvoice::query()
+            ->where('customer_id', $this->customer->id)
+            ->with('serviceAccount')
+            ->latest('due_at')
+            ->limit(24)
+            ->get();
+    }
+
+    public function voidInvoice(int $invoiceId, CustomerInvoices $invoices): void
+    {
+        Gate::authorize(Permissions::INVOICES_VOID);
+
+        $invoice = CustomerInvoice::query()->where('customer_id', $this->customer->id)->findOrFail($invoiceId);
+
+        $invoices->void($invoice, __('Cancelled by :name', ['name' => auth()->user()?->name]));
+
+        app(\App\Support\Audit\AuditLogger::class)->record(
+            event: 'customer_invoice.voided',
+            auditable: $invoice,
+            description: sprintf('Cancelled invoice %s', $invoice->number),
+        );
+
+        unset($this->invoices);
+
+        Flux::toast(variant: 'success', text: __('Invoice :number cancelled.', ['number' => $invoice->number]));
     }
 
     protected function billedAccount(int $accountId): ?ServiceAccount
@@ -480,6 +523,63 @@ new #[Title('Customer')] class extends Component {
                     <flux:table.row>
                         <flux:table.cell colspan="7" class="text-center">
                             <flux:text>{{ __('This customer has no services yet.') }}</flux:text>
+                        </flux:table.cell>
+                    </flux:table.row>
+                @endforelse
+            </flux:table.rows>
+        </flux:table>
+
+        <div>
+            <flux:heading size="lg">{{ __('Invoices') }}</flux:heading>
+            <flux:subheading>
+                {{ __('Raised a few days before each due date and settled when the subscriber pays. They open from the link in every reminder, with no login.') }}
+            </flux:subheading>
+        </div>
+
+        <flux:table>
+            <flux:table.columns>
+                <flux:table.column>{{ __('Invoice') }}</flux:table.column>
+                <flux:table.column>{{ __('Line') }}</flux:table.column>
+                <flux:table.column>{{ __('Due') }}</flux:table.column>
+                <flux:table.column align="end">{{ __('Amount') }}</flux:table.column>
+                <flux:table.column>{{ __('Status') }}</flux:table.column>
+                <flux:table.column />
+            </flux:table.columns>
+
+            <flux:table.rows>
+                @forelse ($this->invoices as $invoice)
+                    <flux:table.row :key="'inv-'.$invoice->id">
+                        <flux:table.cell variant="strong" class="font-mono">{{ $invoice->number }}</flux:table.cell>
+                        <flux:table.cell>
+                            {{ $invoice->serviceAccount?->account_number }}
+                            <flux:text size="sm" class="opacity-70">{{ $invoice->description }}</flux:text>
+                        </flux:table.cell>
+                        <flux:table.cell class="whitespace-nowrap">{{ $invoice->due_at->format('j M Y') }}</flux:table.cell>
+                        <flux:table.cell align="end" class="whitespace-nowrap">{{ $invoice->currency }} {{ number_format((float) $invoice->amount, 2) }}</flux:table.cell>
+                        <flux:table.cell>
+                            <flux:badge size="sm" :color="$invoice->status->color()" inset="top bottom">{{ $invoice->status->label() }}</flux:badge>
+                            @if ($invoice->receipt)
+                                <flux:text size="sm" class="font-mono opacity-70">{{ $invoice->receipt }}</flux:text>
+                            @endif
+                        </flux:table.cell>
+                        <flux:table.cell align="end">
+                            <div class="flex justify-end gap-1">
+                                <flux:button size="sm" variant="ghost" icon="printer" :href="$invoice->publicUrl()" target="_blank">{{ __('Open') }}</flux:button>
+                                @if ($invoice->status->isOutstanding())
+                                    @can(App\Support\Authorization\Permissions::INVOICES_VOID)
+                                        <flux:button size="sm" variant="ghost" icon="x-mark" wire:click="voidInvoice({{ $invoice->id }})"
+                                            wire:confirm="{{ __('Cancel invoice :number? Nothing will be owed on it.', ['number' => $invoice->number]) }}">
+                                            {{ __('Cancel') }}
+                                        </flux:button>
+                                    @endcan
+                                @endif
+                            </div>
+                        </flux:table.cell>
+                    </flux:table.row>
+                @empty
+                    <flux:table.row>
+                        <flux:table.cell colspan="6" class="text-center">
+                            <flux:text>{{ __('No invoices yet. The first is raised a few days before a line is due.') }}</flux:text>
                         </flux:table.cell>
                     </flux:table.row>
                 @endforelse

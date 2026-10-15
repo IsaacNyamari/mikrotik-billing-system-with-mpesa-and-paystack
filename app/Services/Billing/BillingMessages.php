@@ -26,12 +26,12 @@ class BillingMessages
 
     public function before(ServiceAccount $account): string
     {
-        return __(':isp: Hi :name, your internet (:plan) is due on :date. Pay KES :amount here to stay connected: :link', $this->facts($account));
+        return __(':isp: Hi :name, your internet (:plan) is due on :date:invoice. Pay KES :amount here to stay connected: :link', $this->facts($account));
     }
 
     public function due(ServiceAccount $account): string
     {
-        return __(':isp: Hi :name, your internet (:plan) is due today. Pay KES :amount here to stay connected: :link', $this->facts($account));
+        return __(':isp: Hi :name, your internet (:plan) is due today:invoice. Pay KES :amount here to stay connected: :link', $this->facts($account));
     }
 
     public function suspended(ServiceAccount $account): string
@@ -39,12 +39,14 @@ class BillingMessages
         return __(':isp: Hi :name, your internet has been paused because KES :amount was not received. Pay here and you will be reconnected straight away: :link', $this->facts($account));
     }
 
-    public function renewed(ServiceAccount $account, string $amount, ?string $receipt): string
+    public function renewed(ServiceAccount $account, string $amount, ?string $receipt, ?string $receiptUrl = null): string
     {
-        return __(':isp: Payment of KES :paid received:receipt. Your internet (:plan) is active until :date. Thank you.', array_merge($this->facts($account), [
+        $message = __(':isp: Payment of KES :paid received:receipt. Your internet (:plan) is active until :date. Thank you.', array_merge($this->facts($account), [
             'paid' => number_format((float) $amount, 0),
             'receipt' => $receipt !== null ? ' ('.$receipt.')' : '',
         ]));
+
+        return $receiptUrl === null ? $message : $message.' '.__('Receipt: :url', ['url' => $receiptUrl]);
     }
 
     /**
@@ -68,11 +70,15 @@ class BillingMessages
 
         $name = trim((string) $account->customer?->name);
 
+        // The bill being chased, so the text and the invoice it refers to agree.
+        $invoice = $account->invoices()->outstanding()->reorder('due_at')->first();
+
         return [
             'isp' => (string) (Tenancy::tenant()->name ?? config('app.name')),
             'name' => $name !== '' ? strtok($name, ' ') : __('there'),
             'plan' => (string) $account->plan?->name,
-            'amount' => number_format((float) $account->plan?->price, 0),
+            'amount' => number_format((float) ($invoice->amount ?? $account->plan?->price), 0),
+            'invoice' => $invoice !== null ? ' ('.__('invoice :number', ['number' => $invoice->number]).')' : '',
             'date' => $account->expires_at?->format('j M Y') ?? __('today'),
             'link' => $account->payUrl(),
         ];

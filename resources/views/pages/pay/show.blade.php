@@ -76,6 +76,21 @@ new #[Layout('components.layouts.pay')] #[Title('Pay for your internet')] class 
         return ServiceAccount::query()->with(['plan', 'customer'])->findOrFail($this->accountId);
     }
 
+    /**
+     * The last year of bills on this line, so a subscriber can find and print any of them.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\CustomerInvoice>
+     */
+    #[Computed]
+    public function invoices(): \Illuminate\Support\Collection
+    {
+        return \App\Models\CustomerInvoice::query()
+            ->where('service_account_id', $this->accountId)
+            ->latest('due_at')
+            ->limit(12)
+            ->get();
+    }
+
     #[Computed]
     public function payment(): ?Payment
     {
@@ -148,7 +163,7 @@ new #[Layout('components.layouts.pay')] #[Title('Pay for your internet')] class 
             }
         }
 
-        unset($this->payment, $this->account);
+        unset($this->payment, $this->account, $this->invoices);
     }
 
     public function startOver(): void
@@ -235,6 +250,35 @@ new #[Layout('components.layouts.pay')] #[Title('Pay for your internet')] class 
             <p class="text-lg font-bold text-slate-900">{{ __('Not paid') }}</p>
             <p class="mt-1 text-sm text-slate-600">{{ $payment->customerMessage() }}</p>
             <button type="button" wire:click="startOver" class="fe-btn-primary mt-4 w-full">{{ __('Try again') }}</button>
+        </div>
+    @endif
+
+    @if ($this->invoices->isNotEmpty())
+        <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <p class="border-b border-slate-100 px-5 py-3 text-sm font-bold text-slate-900">{{ __('Invoices & receipts') }}</p>
+            <ul class="divide-y divide-slate-100">
+                @foreach ($this->invoices as $invoice)
+                    <li>
+                        <a href="{{ route('pay.invoice', ['token' => $account->pay_token, 'number' => $invoice->number]) }}" target="_blank"
+                            class="flex items-center justify-between gap-3 px-5 py-3 hover:bg-slate-50">
+                            <span class="min-w-0">
+                                <span class="block font-mono text-sm font-semibold text-slate-900">{{ $invoice->number }}</span>
+                                <span class="block truncate text-xs text-slate-500">{{ __('Due :date', ['date' => $invoice->due_at->format('j M Y')]) }}</span>
+                            </span>
+                            <span class="flex shrink-0 items-center gap-3">
+                                <span class="text-sm font-semibold text-slate-900">{{ $invoice->currency }} {{ number_format((float) $invoice->amount, 0) }}</span>
+                                <span @class([
+                                    'rounded-full px-2 py-0.5 text-xs font-semibold',
+                                    'bg-[#0ca30c]/10 text-[#0a7f0a]' => $invoice->status === App\Enums\InvoiceStatus::Paid,
+                                    'bg-[#d03b3b]/10 text-[#b02f2f]' => $invoice->status === App\Enums\InvoiceStatus::Overdue,
+                                    'bg-amber-100 text-amber-700' => $invoice->status === App\Enums\InvoiceStatus::Pending,
+                                    'bg-slate-100 text-slate-500' => $invoice->status === App\Enums\InvoiceStatus::Void,
+                                ])>{{ $invoice->status->label() }}</span>
+                            </span>
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
         </div>
     @endif
 </div>

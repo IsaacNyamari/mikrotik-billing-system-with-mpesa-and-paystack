@@ -135,12 +135,30 @@ class ServiceAccount extends Model
      */
     public function payUrl(): string
     {
+        return route('pay', ['token' => $this->payToken()]);
+    }
+
+    /**
+     * The unguessable part of the subscriber's links, made on first use and kept.
+     */
+    public function payToken(): string
+    {
         if ($this->pay_token === null) {
             $this->pay_token = Str::lower(Str::random(24));
             $this->saveQuietly();
         }
 
-        return route('pay', ['token' => $this->pay_token]);
+        return $this->pay_token;
+    }
+
+    /**
+     * What this line has been billed, newest first.
+     *
+     * @return HasMany<CustomerInvoice, $this>
+     */
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(CustomerInvoice::class)->latest('due_at');
     }
 
     /**

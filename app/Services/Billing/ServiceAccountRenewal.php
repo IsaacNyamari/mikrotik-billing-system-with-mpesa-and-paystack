@@ -30,6 +30,7 @@ class ServiceAccountRenewal
         protected SmsSender $sms,
         protected BillingMessages $messages,
         protected AuditLogger $audit,
+        protected CustomerInvoices $invoices,
     ) {}
 
     public function renew(Payment $payment): Payment
@@ -109,8 +110,10 @@ class ServiceAccountRenewal
             return $payment;
         }
 
+        $invoice = null;
+
         /** @var ServiceAccount|null $account */
-        $account = DB::transaction(function () use ($payment): ?ServiceAccount {
+        $account = DB::transaction(function () use ($payment, &$invoice): ?ServiceAccount {
             $account = ServiceAccount::query()->lockForUpdate()->find($payment->service_account_id);
             $plan = $account?->plan_id !== null ? Plan::query()->find($account->plan_id) : null;
 
@@ -128,6 +131,15 @@ class ServiceAccountRenewal
 
             $payment->applied_at = now();
             $payment->save();
+
+            // The invoice it pays, or a paid one left behind as the receipt.
+            $account->setRelation('plan', $plan);
+            $invoice = $this->invoices->settle(
+                $payment,
+                $account,
+                $previous !== null ? CarbonImmutable::parse($previous) : null,
+                $next,
+            );
 
             $this->audit->record(
                 event: 'service_account.renewed',
@@ -163,7 +175,7 @@ class ServiceAccountRenewal
         $phone = (string) ($account->customer?->phone ?: $payment->phone);
 
         if ($phone !== '') {
-            $this->sms->send($phone, $this->messages->renewed($account, (string) $payment->amount, $payment->receipt), BillingMessages::RENEWED, $account);
+            $this->sms->send($phone, $this->messages->renewed($account, (string) $payment->amount, $payment->receipt, $invoice?->publicUrl()), BillingMessages::RENEWED, $account);
         }
 
         return $payment->refresh();

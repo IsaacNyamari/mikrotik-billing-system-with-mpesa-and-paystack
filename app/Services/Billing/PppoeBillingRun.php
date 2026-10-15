@@ -23,7 +23,7 @@ use Carbon\CarbonImmutable;
  *
  * Runs inside `Tenancy::forTenant()` — everything here reads the current ISP.
  *
- * @phpstan-type Tally array{before: int, due: int, suspended: int, renewed: int}
+ * @phpstan-type Tally array{invoiced: int, before: int, due: int, suspended: int, renewed: int}
  */
 class PppoeBillingRun
 {
@@ -32,6 +32,7 @@ class PppoeBillingRun
         protected BillingMessages $messages,
         protected ChangeServiceAccountStatus $status,
         protected ServiceAccountRenewal $renewal,
+        protected CustomerInvoices $invoices,
     ) {}
 
     /**
@@ -40,9 +41,10 @@ class PppoeBillingRun
     public function run(?CarbonImmutable $now = null): array
     {
         $now ??= CarbonImmutable::now();
-        $tally = ['before' => 0, 'due' => 0, 'suspended' => 0, 'renewed' => 0];
+        $tally = ['invoiced' => 0, 'before' => 0, 'due' => 0, 'suspended' => 0, 'renewed' => 0];
 
         $tally['renewed'] = $this->catchUpRenewals();
+        $this->invoices->markOverdue();
 
         $daysBefore = max(1, SmsSetting::current()->remind_days_before);
         $daytime = $this->isDaytime($now);
@@ -58,6 +60,11 @@ class PppoeBillingRun
             ->where('expires_at', '<=', $now->addDays($daysBefore + 1))
             ->orderBy('id')
             ->each(function (ServiceAccount $account) use ($now, $daysBefore, $daytime, &$tally): void {
+                // The bill first, so every reminder below has an invoice to point at.
+                if ($this->invoices->raiseFor($account)?->wasRecentlyCreated) {
+                    $tally['invoiced']++;
+                }
+
                 if ($account->status === ServiceAccountStatus::Suspended) {
                     // Only lines this run cut are its business; one an operator suspended is not.
                     if ($account->suspended_for_nonpayment && $daytime && ! $this->toldOfSuspension($account)) {

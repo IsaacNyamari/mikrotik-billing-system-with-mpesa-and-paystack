@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CustomerInvoiceController;
 use App\Http\Controllers\HotspotPageController;
 use App\Http\Controllers\MpesaCallbackController;
 use App\Http\Controllers\PaystackWebhookController;
@@ -24,6 +25,7 @@ Route::livewire('p/{portalKey}', 'pages::portal.index')->name('portal');
 // Where a PPPoE subscriber pays from the link in their reminder text. Public: the token says
 // which line, and so which ISP.
 Route::livewire('pay/{token}', 'pages::pay.show')->name('pay');
+Route::get('pay/{token}/invoices/{number}', CustomerInvoiceController::class)->name('pay.invoice');
 
 // Fetched by the router itself during hotspot:install-portal, then served from its own
 // storage to customers.

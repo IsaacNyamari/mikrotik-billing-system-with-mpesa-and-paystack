@@ -33,7 +33,8 @@ class PppoeBillingCommand extends Command
 
             if (array_sum($tally) > 0) {
                 $this->components->twoColumnDetail($tenant->name, sprintf(
-                    '%d before, %d due, %d cut, %d renewed',
+                    '%d invoiced, %d before, %d due, %d cut, %d renewed',
+                    $tally['invoiced'],
                     $tally['before'],
                     $tally['due'],
                     $tally['suspended'],

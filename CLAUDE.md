@@ -817,6 +817,23 @@ customer page. `CallbackProcessor::grantAccess()` sends any payment with a
 `renew()` is idempotent (`applied_at`, a cache lock, a row lock): it extends from the current
 expiry if still running, else from now, reconnects, and texts a receipt.
 
+**Invoices** (`customer_invoices`, `CustomerInvoices`): what a subscriber owes their ISP, one
+row per line per due date (unique index, so the run can raise it every five minutes and get
+the same row). Numbered `INV-000001` per ISP by `SequenceGenerator`. Separate from
+`tenant_invoices`, which is the ISP's bill from the platform.
+
+- Raised by `pppoe:billing` when a line enters its reminder window, so the reminder can name
+  it. `Pending` turns `Overdue` once the due date passes.
+- `ServiceAccountRenewal` settles the oldest outstanding one with the payment, the receipt and
+  the period actually bought. A payment with nothing outstanding (cash, paying early) leaves a
+  **paid invoice behind as the receipt**, so every shilling has a document.
+- Moving paid-until forward by hand voids what was outstanding before the new date. Operators
+  with `invoices.void` can cancel one from the customer page.
+- **Subscribers never sign in.** Invoices open at `pay/{token}/invoices/{number}`
+  (`CustomerInvoiceController`, printable, "Print or save as PDF"). The number must belong to
+  the line the token opens. The pay page lists the last twelve, reminders name the invoice,
+  and the payment text links the receipt.
+
 **SMS is HostPinnacle** (`itsmurumba/laravel-hostpinnacle`, SaaS mode left off) behind
 `SmsSender`. The ISP's own account (`sms_settings`, password and API key encrypted, sender ID
 theirs) is used first, then the platform's (`HOSTPINNACLE_*` in the environment), else the
