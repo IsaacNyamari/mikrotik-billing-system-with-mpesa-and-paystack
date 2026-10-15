@@ -42,6 +42,7 @@ class RouterWatcher
         protected OutageCompensator $compensator,
         protected HotspotRelogin $relogin,
         protected AuditLogger $audit,
+        protected SetupFinisher $finisher,
     ) {}
 
     public function watch(Router $router): void
@@ -73,6 +74,10 @@ class RouterWatcher
         $this->relogin->attempt($router);
 
         $this->noteWhoIsOnline($router);
+
+        // A router the platform just rebuilt: confirm its HotSpot, or build it over the API
+        // if its first boot could not.
+        $this->finisher->finish($router);
     }
 
     /**

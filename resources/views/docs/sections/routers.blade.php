@@ -1,79 +1,97 @@
 {{--
     Chapter 2. Adding a router.
 
-    The single riskiest thing an operator does on this platform, because the wipe option is
-    genuinely destructive and getting WAN and LAN the wrong way round strands a device that then
-    has to be reached with a cable. Said plainly here, and said again in the script itself.
+    Written from what actually goes wrong in front of a real MikroTik: the cable in the wrong
+    port, the factory password, a laptop on the wrong side of the router. Each of those cost a
+    real operator an afternoon before this chapter existed. The happy path is short on purpose;
+    the rest is the part people come back to read when the router is not where they expect.
 --}}
 
 <div class="flex flex-col gap-5 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
     <p>
-        {{ __('A router behind somebody\'s broadband cannot be dialled from the internet, so it cannot be configured over the API — there is no API to reach yet. The way in is a script generated here and pasted into the device\'s own terminal. It is the only channel that always works, which is why it does everything at once: the tunnel, the API user, the firewall, the wifi, the HotSpot and the login pages.') }}
+        {{ __('A router behind somebody\'s broadband cannot be dialled from the internet, so the platform cannot configure it until the router calls in. The way in is one script, generated here and pasted into the router\'s own terminal. It wipes the router, rebuilds it from nothing and connects it to the platform. From then on everything is done from this dashboard.') }}
     </p>
 
-    <flux:heading size="sm">{{ __('What to have ready') }}</flux:heading>
+    <flux:heading size="sm">{{ __('Wire it up first') }}</flux:heading>
 
-    <ul class="flex list-disc flex-col gap-2 ps-5">
-        <li>{{ __('Physical or Winbox access to the router. You will paste into its terminal.') }}</li>
-        <li>{{ __('Which port its internet arrives on. Usually ether1.') }}</li>
-        <li>{{ __('Which port or radio your customers connect to. Usually ether3 and wlan1.') }}</li>
-        <li>{{ __('The router already online, so it can download its login pages while the script runs.') }}</li>
-    </ul>
+    <div class="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
+        <table class="w-full text-left">
+            <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
+                <tr><td class="px-4 py-3 font-semibold">ether1</td><td class="px-4 py-3">{{ __('Your internet: the cable from your modem or upstream router. With a PoE injector, its data/LAN port goes to the modem and its PoE port to ether1.') }}</td></tr>
+                <tr><td class="px-4 py-3 font-semibold">ether3 + wifi</td><td class="px-4 py-3">{{ __('Your customers. The HotSpot covers both.') }}</td></tr>
+                <tr><td class="px-4 py-3 font-semibold">ether2, 4, 5</td><td class="px-4 py-3">{{ __('Your laptop, when you need to reach the router by hand. Plug in and the router gives you an address; Winbox answers at 192.168.88.1.') }}</td></tr>
+            </tbody>
+        </table>
+    </div>
 
-    <flux:callout variant="warning" icon="exclamation-triangle">
-        <flux:callout.heading>{{ __('Check the two interface names before you paste') }}</flux:callout.heading>
+    <flux:heading size="sm">{{ __('Add it in three steps') }}</flux:heading>
+
+    <ol class="flex list-decimal flex-col gap-2 ps-5">
+        <li>{{ __('Routers → Add router and give it a name. You land on its setup page: check the internet port (ether1), the customer port (ether3) and the wifi name.') }}</li>
+        <li>{{ __('Copy the script and paste it into the router\'s terminal: Winbox → New Terminal, or WebFig → Terminal, logged in as admin.') }}</li>
+        <li>{{ __('Watch Progress on the setup page. It ticks through download, online and HotSpot ready by itself, in about two minutes. Nothing else to press.') }}</li>
+    </ol>
+
+    <flux:callout icon="shield-check">
+        <flux:callout.heading>{{ __('The script checks before it changes anything') }}</flux:callout.heading>
         <flux:callout.text>
-            {{ __('Putting the internet port into the customer bridge takes the router off the internet mid-script, and it takes your own session with it. Run /interface print on the device first and be certain. If it happens anyway, the fix is a cable and a walk.') }}
+            {{ __('It first makes sure ether1 has a cable, the router has internet and it can reach this platform. If any of that is missing it says exactly what, and stops — "Nothing has been changed." Fix that one thing and paste again.') }}
         </flux:callout.text>
     </flux:callout>
 
-    <flux:heading size="sm">{{ __('Two kinds of script') }}</flux:heading>
+    <flux:heading size="sm">{{ __('After it runs') }}</flux:heading>
 
-    <div class="grid gap-3 sm:grid-cols-2">
-        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
-            <flux:badge color="zinc" size="sm">{{ __('Default') }}</flux:badge>
-            <flux:heading size="sm" class="mt-2">{{ __('Add to what is there') }}</flux:heading>
-            <flux:text class="mt-1">
-                {{ __('Builds the platform\'s pieces alongside whatever the router already has. Right for a device already carrying your own configuration. Safe to run more than once — pasting it twice leaves one of each thing, not two.') }}
-            </flux:text>
-        </div>
-
-        <div class="rounded-lg border border-amber-300 p-4 dark:border-amber-700">
-            <flux:badge color="amber" size="sm">{{ __('Destructive') }}</flux:badge>
-            <flux:heading size="sm" class="mt-2">{{ __('Wipe and rebuild') }}</flux:heading>
-            <flux:text class="mt-1">
-                {{ __('Erases the router completely and builds it again from nothing. Right for a device straight out of its box. There is no undo and no backup kept. The router downloads its configuration first, then resets and reboots — give it two minutes before you expect it back.') }}
-            </flux:text>
-        </div>
-    </div>
-
-    <flux:heading size="sm">{{ __('What the script does, in order') }}</flux:heading>
-
-    <p>{{ __('The order is a security property, not a preference. Each step is only safe once the one before it has happened.') }}</p>
-
-    <ol class="flex flex-col gap-2 ps-5" style="list-style: decimal">
-        <li>{{ __('Brings up the management tunnel, so the platform can see the device at all.') }}</li>
-        <li>{{ __('Creates an API user restricted to the tunnel, and firewalls the API off every other interface — before enabling it. Opening the API first, even briefly, advertises an admin service to the internet.') }}</li>
-        <li>{{ __('Builds the bridge, the address pool, DHCP and the HotSpot itself.') }}</li>
-        <li>{{ __('Opens the walled garden, so a customer who has paid nothing can still reach the page where they pay.') }}</li>
-        <li>{{ __('Downloads the login pages, which hand the customer to your portal instead of asking for a username they have never been given.') }}</li>
-        <li>{{ __('Switches on the wifi, open, because the HotSpot is what checks who somebody is and a wifi password would turn a customer away before they could buy anything.') }}</li>
-    </ol>
+    <ul class="flex list-disc flex-col gap-2 ps-5">
+        <li>{{ __('The stock admin account is switched off. You log in as isp-admin; its password is on the setup page under Administrator login → Show password.') }}</li>
+        <li>{{ __('Winbox finds the router by MAC address on every port, including from your own network through ether1. By IP, from ether2, 4 or 5 at 192.168.88.1.') }}</li>
+        <li>{{ __('Join the wifi with a phone: the payment page opens by itself.') }}</li>
+        <li>{{ __('If the HotSpot could not be built on the router\'s first boot, the platform finishes it over the tunnel as soon as the router is online. You will see it tick on the setup page.') }}</li>
+    </ul>
 
     <flux:callout icon="key">
         <flux:callout.heading>{{ __('The script is a password') }}</flux:callout.heading>
         <flux:callout.text>
-            {{ __('It contains that router\'s private key and API password. Do not forward it, and if it goes astray generate another — doing so changes the password, and the old script stops working.') }}
+            {{ __('It carries that router\'s keys and a one-time download link. Do not forward it. The link works once and expires after 30 minutes; reload the setup page for a fresh one.') }}
         </flux:callout.text>
     </flux:callout>
 
-    <flux:heading size="sm">{{ __('Afterwards') }}</flux:heading>
+    <flux:separator />
 
-    <ul class="flex list-disc flex-col gap-2 ps-5">
-        <li>{{ __('The router\'s page here should show it online within a minute or so. If it does not, the tunnel is the first thing to look at.') }}</li>
-        <li>{{ __('Join the wifi with a phone. You should land on your portal without typing anything.') }}</li>
-        <li>{{ __('Your packages reach the device the first time somebody buys one, or immediately if you push them by hand from the plan\'s page.') }}</li>
-    </ul>
+    <flux:heading size="sm">{{ __('When you cannot get into the router') }}</flux:heading>
+
+    <p>{{ __('Before the script can run you have to be logged in to the router. These are the ways that fails, in the order they usually happen.') }}</p>
+
+    <div class="flex flex-col gap-3">
+        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+            <flux:heading size="sm">{{ __('It shows in Winbox for a moment, then disappears') }}</flux:heading>
+            <flux:text class="mt-1">{{ __('Your laptop is reaching it through ether1. MikroTik\'s own default setup hides Winbox on ether1, because ether1 is the internet side. Plug the laptop into ether2 instead, or join the router\'s wifi.') }}</flux:text>
+        </div>
+
+        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+            <flux:heading size="sm">{{ __('admin with no password is refused') }}</flux:heading>
+            <flux:text class="mt-1">{{ __('Newer MikroTik routers ship with their own password, printed on the sticker underneath. Type it by hand — 0 and O, 1 and l are easy to mix up — and use a private browser window so a saved password is not filled in for you.') }}</flux:text>
+        </div>
+
+        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+            <flux:heading size="sm">{{ __('Nothing works, or it was set up somewhere else before') }}</flux:heading>
+            <flux:text class="mt-1">{{ __('Reset it: unplug the power, hold the reset button, plug the power back in and let go the moment the ACT light starts flashing (about 5 seconds). When the router\'s wifi appears as MikroTik-xxxxxx it has its factory setup again. Holding much longer puts it in other modes; just do it again.') }}</flux:text>
+        </div>
+
+        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+            <flux:heading size="sm">{{ __('Even the reset does not get you in') }}</flux:heading>
+            <flux:text class="mt-1">{{ __('Netinstall reinstalls RouterOS and clears every password. Download Netinstall and the RouterOS package for your router\'s architecture from mikrotik.com. Connect your computer to ether1, start Netinstall as administrator with Net booting enabled and a client address in your own network, then power the router on holding reset for 15–20 seconds until it appears in the list. Select it and the packages, tick Apply default config, and Install. Afterwards log in as admin on ether2.') }}</flux:text>
+        </div>
+
+        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+            <flux:heading size="sm">{{ __('The script says ether1 has no cable link') }}</flux:heading>
+            <flux:text class="mt-1">{{ __('The cable from your modem is not in ether1 — or, with a PoE injector, its two ports are the wrong way round. The data/LAN port goes to the modem, the PoE port to the router.') }}</flux:text>
+        </div>
+
+        <div class="rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+            <flux:heading size="sm">{{ __('Progress stops at "online"') }}</flux:heading>
+            <flux:text class="mt-1">{{ __('The router rebuilt itself but cannot reach the platform. Connect in Winbox by MAC address as isp-admin, open Log and look for lines starting "platform-setup": they say how far it got and what stopped it.') }}</flux:text>
+        </div>
+    </div>
 
     @if ($this->routers->isNotEmpty())
         <flux:separator />
@@ -83,7 +101,7 @@
         <div class="flex flex-wrap gap-2">
             @foreach ($this->routers as $router)
                 <flux:button
-                    :href="route('routers.show', $router)"
+                    :href="route('routers.setup', $router)"
                     wire:navigate
                     size="sm"
                     variant="ghost"

@@ -43,6 +43,8 @@ use Illuminate\Support\Str;
  * @property string|null $provision_token
  * @property CarbonImmutable|null $provision_token_expires_at
  * @property CarbonImmutable|null $provision_fetched_at
+ * @property CarbonImmutable|null $config_downloaded_at
+ * @property CarbonImmutable|null $hotspot_ready_at
  * @property RouterStatus $status
  * @property string|null $last_error
  * @property CarbonImmutable|null $last_seen_at
@@ -129,6 +131,8 @@ class Router extends Model
             'setup_options' => 'array',
             'provision_token_expires_at' => 'datetime',
             'provision_fetched_at' => 'datetime',
+            'config_downloaded_at' => 'datetime',
+            'hotspot_ready_at' => 'datetime',
         ];
     }
 

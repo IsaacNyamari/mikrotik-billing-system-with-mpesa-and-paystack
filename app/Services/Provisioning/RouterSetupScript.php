@@ -234,14 +234,28 @@ class RouterSetupScript
         $subnet = (string) config('wireguard.subnet');
         $portalHost = (string) (parse_url((string) config('app.url'), PHP_URL_HOST) ?: 'localhost');
 
+        // After the preamble — which builds the way in and must run in the open — each section
+        // runs on its own. RouterOS stops a run-after-reset file at its first error, and a
+        // first boot once ended at one firewall rule in the tunnel section: no API user, no
+        // HotSpot, no wifi, and a router the platform could see and not speak to. Now a
+        // failing section is logged under its own name and the rest still runs.
         $lines = [
             $this->resetPreamble($router, $options),
-            $this->tunnelSection($router, $wgInterface, $subnet),
-            $this->apiSection($router, $wgInterface, $apiUser, $apiGroup, (string) $router->api_password, $serverAddress, $subnet, $this->subnet(config('wireguard.local_api_subnet'))),
+            $this->deferred($this->tunnelSection($router, $wgInterface, $subnet), 'the management tunnel'),
+            $this->deferred($this->apiSection($router, $wgInterface, $apiUser, $apiGroup, (string) $router->api_password, $serverAddress, $subnet, $this->subnet(config('wireguard.local_api_subnet'))), 'the platform API user'),
         ];
 
         if ($withHotspot) {
-            $lines[] = $this->hotspotSection($router, $bridge, $lan, $pool, $hotspot, $network, $gateway, $poolStart, $poolEnd, $portalHost);
+            // Two blocks rather than one: the login-page downloads are half the section, and
+            // kept together they would push it past the length RouterOS allows a string. Split
+            // there, a page that fails to download also never costs the HotSpot itself.
+            $section = $this->hotspotSection($router, $bridge, $lan, $pool, $hotspot, $network, $gateway, $poolStart, $poolEnd, $portalHost);
+            $split = strpos($section, '# 3b. The login page');
+            $lines[] = $this->deferred($split === false ? $section : substr($section, 0, $split), 'the HotSpot');
+
+            if ($split !== false) {
+                $lines[] = $this->deferred(substr($section, $split), 'the HotSpot login pages');
+            }
 
             if (($options['with_wireless'] ?? true) === true) {
                 $lines[] = $this->wirelessSection(
@@ -253,13 +267,13 @@ class RouterSetupScript
         }
 
         if (($options['with_pppoe'] ?? false) === true) {
-            $lines[] = $this->pppoeSection(
+            $lines[] = $this->deferred($this->pppoeSection(
                 $this->name($options['pppoe_interface'] ?? 'ether4'),
                 $this->name($options['pppoe_service_name'] ?? 'isp'),
                 (string) ($options['pppoe_network'] ?? '10.20.0.0/24'),
                 (string) ($options['pppoe_gateway'] ?? '10.20.0.1'),
                 $hotspot.'-pppoe-pool',
-            );
+            ), 'the PPPoE server');
         }
 
         $lines[] = $this->closingSection($router);
@@ -371,6 +385,7 @@ class RouterSetupScript
             default => 'DHCP',
         };
         $admin = $this->name($router->admin_username ?? 'isp-admin');
+        $host = (string) (parse_url($url, PHP_URL_HOST) ?: 'localhost');
 
         return <<<SCRIPT
         # =====================================================================
@@ -398,36 +413,51 @@ class RouterSetupScript
         #  The link below works once and expires in {$minutes} minutes.
         # =====================================================================
 
-        # 1. Fetch the configuration onto the router. It has to be on the device
-        #    before the reset, because the reset reboots immediately and takes
-        #    the rest of this paste with it. Boards with a flash/ folder keep
-        #    only what is in it across a reboot, so it goes there when present.
-        :if ([:len [/file find name="flash"]] > 0) do={
-            /tool/fetch url="{$url}" mode={$mode} dst-path=flash/platform-setup.rsc check-certificate=no
-        } else={
-            /tool/fetch url="{$url}" mode={$mode} dst-path=platform-setup.rsc check-certificate=no
-        }
+        # Everything below is one block, deliberately. Pasted line by line, a
+        # check that failed would print its message and RouterOS would carry on
+        # to the next line anyway — all the way to the reset. As one block, the
+        # first failure stops the lot and nothing on the router has changed.
+        {
+            # 0. Can this router reach the platform at all? Checked first, so a
+            #    missing cable is a clear sentence now rather than a wiped router
+            #    that cannot finish later.
+            :put "Checking {$wan} and the internet…"
+            :if ([:len [/interface find name="{$wan}"]] = 0) do={
+                :error "There is no port called {$wan} on this router. Fix the uplink on the setup page and copy the script again. Nothing has been changed."
+            }
+            :if ([/interface get [find name="{$wan}"] running] = false) do={
+                :error "{$wan} has no cable link. Plug your internet (modem or upstream router) into {$wan} and paste again. Nothing has been changed."
+            }
+            :do { :resolve "{$host}" } on-error={
+                :error "This router cannot look up {$host}: it has no working internet or DNS on {$wan}. Check that {$wan} gets internet, then paste again. Nothing has been changed."
+            }
 
-        # 2. Make sure it actually arrived. Resetting without it would leave the
-        #    router wiped, unconfigured and unreachable.
-        :if ([:len [/file find where name~"platform-setup.rsc"]] = 0) do={
-            :error "Download failed — the router has no internet, or cannot reach the platform. Nothing has been changed."
-        }
+            # 1. Fetch the configuration onto the router. It has to be on the
+            #    device before the reset, because the reset reboots immediately.
+            #    Boards with a flash/ folder keep only what is in it across a
+            #    reboot, so it goes there when present.
+            :put "Downloading this router's configuration…"
+            :local file "platform-setup.rsc"
+            :if ([:len [/file find name="flash"]] > 0) do={ :set file "flash/platform-setup.rsc" }
+            :do {
+                /tool/fetch url="{$url}" mode={$mode} dst-path=\$file check-certificate=no
+            } on-error={
+                :error "The download failed. The setup link may be used up or expired — reload the setup page and copy the script again. Nothing has been changed."
+            }
+            :delay 1s
+            :if ([:len [/file find name=\$file]] = 0) do={
+                :error "The configuration did not arrive. Reload the setup page and copy the script again. Nothing has been changed."
+            }
 
-        # 3. Wipe at once, reboot, and run what we just downloaded on the way
-        #    back up. Run as a stored script because typed at the terminal the
-        #    reset stops to ask "Reset anyway? [y/N]" — and a paste waiting on
-        #    a question nobody sees looks exactly like nothing happening.
-        #    no-defaults: the MikroTik defaults are not restored either; the
-        #    downloaded file is the entire configuration.
-        /system/script remove [find name="platform-reset"]
-        :if ([:len [/file find name="flash/platform-setup.rsc"]] > 0) do={
-            /system/script add name="platform-reset" source="/system/reset-configuration no-defaults=yes skip-backup=yes run-after-reset=flash/platform-setup.rsc"
-        } else={
-            /system/script add name="platform-reset" source="/system/reset-configuration no-defaults=yes skip-backup=yes run-after-reset=platform-setup.rsc"
+            # 2. Wipe at once, reboot, and run what was downloaded on the way
+            #    back up. Run as a stored script because typed at the terminal
+            #    the reset stops to ask "Reset anyway? [y/N]". no-defaults: the
+            #    downloaded file is the entire configuration.
+            /system/script remove [find name="platform-reset"]
+            /system/script add name="platform-reset" source=("/system/reset-configuration no-defaults=yes skip-backup=yes run-after-reset=" . \$file)
+            :put "All checks passed. Resetting now — the router reboots and comes back configured in about two minutes. Watch the setup page: it follows along."
+            /system/script run platform-reset
         }
-        :put "Resetting now. The router reboots and comes back configured in a minute or two.";
-        /system/script run platform-reset
         SCRIPT;
     }
 
@@ -688,6 +718,14 @@ class RouterSetupScript
      */
     protected function deferred(string $commands, string $what): string
     {
+        // Comments and blank lines are dropped: they explain the readable sections, mean
+        // nothing inside a string handed to :parse, and older RouterOS caps a string near
+        // 4 KB. Kept in, the HotSpot section alone was twice that.
+        $commands = implode("\n", array_filter(
+            explode("\n", str_replace("\r\n", "\n", $commands)),
+            fn (string $line): bool => trim($line) !== '' && ! str_starts_with(ltrim($line), '#'),
+        ));
+
         $escaped = str_replace(['\\', '"', '$', "\n"], ['\\\\', '\\"', '\\$', '\\n'], $commands);
 
         return ':do { [[:parse "'.$escaped.'"]] } on-error={ :log warning "platform-setup: '.$what.' skipped or failed" }';
@@ -948,12 +986,18 @@ class RouterSetupScript
         # on. Taken out of mangle before any marking rule sees it, so a queue
         # tree an ISP adds later to shape their subscribers cannot put a
         # provisioning command behind somebody's download.
-        /ip/firewall/mangle
-        remove [find comment="platform-management"]
-        add chain=prerouting in-interface="{$interface}" action=accept \\
-            place-before=0 comment="platform-management"
-        add chain=output out-interface="{$interface}" action=accept \\
-            place-before=1 comment="platform-management"
+        #
+        # place-before only when there is something to place before: on a freshly
+        # wiped router the list is empty, "place-before=0" names a rule that does
+        # not exist, and RouterOS stops the whole file right here.
+        /ip/firewall/mangle remove [find comment="platform-management"]
+        :if ([:len [/ip/firewall/mangle find]] > 0) do={
+            /ip/firewall/mangle add chain=prerouting in-interface="{$interface}" action=accept place-before=0 comment="platform-management"
+            /ip/firewall/mangle add chain=output out-interface="{$interface}" action=accept place-before=1 comment="platform-management"
+        } else={
+            /ip/firewall/mangle add chain=prerouting in-interface="{$interface}" action=accept comment="platform-management"
+            /ip/firewall/mangle add chain=output out-interface="{$interface}" action=accept comment="platform-management"
+        }
 
         # Nudge the tunnel awake rather than waiting for the first keepalive, so
         # the platform can reach this router the moment the paste finishes
@@ -992,8 +1036,7 @@ class RouterSetupScript
         # Generated because wireguard.local_api_subnet is set. It must not be set on a
         # platform serving real ISPs — a router in a shop sits on somebody else's LAN, and
         # whoever else is on that LAN is not us.
-        add chain=input protocol=tcp dst-port=8728 src-address={$localSubnet} \\
-            action=accept comment="platform-api-allow-local" place-before=0
+        /ip/firewall/filter add chain=input protocol=tcp dst-port=8728 src-address={$localSubnet} action=accept comment="platform-api-allow-local" place-before=0
         RULE;
 
         $localNote = $localSubnet === '' ? '' : "\n        # Also answers {$localSubnet}, for a machine on the same bench as this router.";
@@ -1034,14 +1077,19 @@ class RouterSetupScript
         # is assigned, which reads as a broken network rather than a disabled service.
         set api-ssl disabled=yes
 
+        # The drop goes in first and the allow above it, so it never matters
+        # whether the list was empty: each place-before names a rule that is
+        # already there.
         /ip/firewall/filter
         remove [find comment="platform-api-allow"]
         remove [find comment="platform-api-allow-local"]
         remove [find comment="platform-api-drop"]
-        add chain=input protocol=tcp dst-port=8728 src-address={$serverAddress} \\
-            action=accept comment="platform-api-allow" place-before=0{$localRule}
-        add chain=input protocol=tcp dst-port=8728 \\
-            action=drop comment="platform-api-drop" place-before=1
+        :if ([:len [/ip/firewall/filter find]] > 0) do={
+            /ip/firewall/filter add chain=input protocol=tcp dst-port=8728 action=drop comment="platform-api-drop" place-before=0
+        } else={
+            /ip/firewall/filter add chain=input protocol=tcp dst-port=8728 action=drop comment="platform-api-drop"
+        }
+        /ip/firewall/filter add chain=input protocol=tcp dst-port=8728 src-address={$serverAddress} action=accept comment="platform-api-allow" place-before=0{$localRule}
         SCRIPT;
     }
 

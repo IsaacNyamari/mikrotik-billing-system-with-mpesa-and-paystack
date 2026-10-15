@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\SyncWireGuardPeers;
+use App\Jobs\WatchRouter;
 use App\Models\Router;
 use App\Services\Provisioning\RouterSetupScript;
 use App\Support\Tenancy\Facades\Tenancy;
@@ -46,7 +47,16 @@ class RouterProvisionController extends Controller
             // able to try again, but one that succeeded must not hand the same file to anyone
             // else. The window is the download itself.
             $router->provision_fetched_at = now();
+            // Kept for good, unlike the link's own stamp: this is how the setup page knows
+            // the router got its configuration, whatever links are issued afterwards. A new
+            // build starts with its HotSpot unconfirmed.
+            $router->config_downloaded_at = now();
+            $router->hotspot_ready_at = null;
             $router->save();
+
+            // Look at it as soon as it should be back, rather than at the next minute's
+            // watch: reboot, rebuild and a tunnel handshake take about a minute and a half.
+            WatchRouter::dispatch($router->tenant_id, $router->id)->delay(now()->addSeconds(100));
 
             Log::info('Router fetched its provisioning script', [
                 'router' => $router->id,

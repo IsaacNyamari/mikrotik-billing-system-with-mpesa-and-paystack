@@ -307,6 +307,87 @@ new #[Title('Router setup')] class extends Component {
     }
 
     /**
+     * Where this router is in being set up, as the operator should see it after pasting.
+     *
+     * Every step is something the platform recorded, not something the operator has to go
+     * and find out: the router downloading its configuration, the router answering down the
+     * tunnel, the HotSpot confirmed or built. A step that takes far longer than it should
+     * says what to look at.
+     *
+     * @return array{active: bool, steps: array<int, array{label: string, state: string, text: string}>}
+     */
+    #[Computed]
+    public function progress(): array
+    {
+        $router = $this->router;
+        $downloaded = $router->config_downloaded_at;
+        $withHotspot = ($router->setupOptions()['with_hotspot'] ?? true) === true;
+        $online = $downloaded !== null
+            && $router->status === App\Enums\RouterStatus::Online
+            && $router->reachedOverTunnel()
+            && $router->last_seen_at?->greaterThanOrEqualTo($downloaded);
+        $since = $downloaded?->diffInSeconds(now()) ?? 0;
+        $run = Illuminate\Support\Facades\Cache::get(App\Jobs\SetUpHotspot::cacheKey($router->id));
+        $hotspotFailed = ($run['status'] ?? null) === 'done' && collect($run['report'] ?? [])->contains('status', 'failed');
+
+        $steps = [[
+            'label' => __('Router downloaded its configuration'),
+            'state' => $downloaded !== null ? 'done' : 'waiting',
+            'text' => $downloaded !== null
+                ? __(':when. It wiped itself and is rebuilding.', ['when' => $downloaded->diffForHumans()])
+                : __('Paste the script into the router\'s terminal. This ticks the moment it downloads its setup.'),
+        ], [
+            'label' => __('Router is online through the tunnel'),
+            'state' => $online ? 'done' : ($downloaded === null ? 'pending' : ($since > 240 ? 'stuck' : 'waiting')),
+            'text' => match (true) {
+                $online => __('The platform reaches it at :address.', ['address' => $router->wg_address]),
+                $downloaded === null => __('After the download.'),
+                $since > 240 => __('Not back after 4 minutes. Check that ether1 still has internet, then connect in Winbox by MAC address and look at Log for lines starting "platform-setup".'),
+                default => __('Rebooting and connecting — usually about two minutes.'),
+            },
+        ]];
+
+        if ($withHotspot) {
+            $steps[] = [
+                'label' => __('HotSpot ready'),
+                'state' => $router->hotspot_ready_at !== null ? 'done' : (! $online ? 'pending' : ($hotspotFailed ? 'stuck' : 'waiting')),
+                'text' => match (true) {
+                    $router->hotspot_ready_at !== null => __('Customers who join the network are sent to the payment page.'),
+                    ! $online => __('Once the router is online.'),
+                    $hotspotFailed => __('It could not be finished automatically. Open HotSpot setup to see which step failed.'),
+                    default => __('Checking, and finishing it over the tunnel if the first boot could not.'),
+                },
+            ];
+        }
+
+        $complete = collect($steps)->every(fn (array $step): bool => $step['state'] === 'done');
+
+        return [
+            'active' => $downloaded !== null && ! $complete && $since < 1800,
+            'steps' => $steps,
+        ];
+    }
+
+    /**
+     * Look at the router now, while somebody is watching the progress — at most every
+     * fifteen seconds, whatever the page's poll does.
+     */
+    public function checkProgress(App\Services\RouterOs\Outages\RouterWatcher $watcher): void
+    {
+        Gate::authorize('view', $this->router);
+
+        if (Illuminate\Support\Facades\Cache::add('setup-watch:'.$this->routerId, true, now()->addSeconds(15))) {
+            try {
+                $watcher->watch($this->router);
+            } catch (Throwable) {
+                // The progress list reports what is known; one failed look is not news.
+            }
+        }
+
+        unset($this->router, $this->progress);
+    }
+
+    /**
      * Throw the keys and the password away and issue new ones.
      */
     public function rotate(TunnelAllocator $allocator, AuditLogger $audit): void
@@ -644,6 +725,39 @@ new #[Title('Router setup')] class extends Component {
                 </div>
             </flux:card>
         @endif
+
+        @php($progress = $this->progress)
+
+        {{-- The poll sits on a plain element, as on the HotSpot page: Blade cannot compile an
+             @if inside a Flux component's opening tag. --}}
+        <div @if ($progress['active']) wire:poll.5s="checkProgress" @endif>
+            <flux:card class="flex flex-col gap-4">
+                <div>
+                    <flux:heading size="lg">{{ __('Progress') }}</flux:heading>
+                    <flux:subheading>{{ __('Follows the router by itself after you paste. Nothing to press.') }}</flux:subheading>
+                </div>
+
+                <ol class="flex flex-col gap-3">
+                    @foreach ($progress['steps'] as $step)
+                        <li class="flex items-start gap-3">
+                            @if ($step['state'] === 'done')
+                                <flux:icon.check-circle class="mt-0.5 size-5 shrink-0 text-green-600" />
+                            @elseif ($step['state'] === 'stuck')
+                                <flux:icon.exclamation-triangle class="mt-0.5 size-5 shrink-0 text-amber-500" />
+                            @elseif ($step['state'] === 'waiting')
+                                <flux:icon.arrow-path class="mt-0.5 size-5 shrink-0 animate-spin text-blue-600" />
+                            @else
+                                <div class="mt-0.5 size-5 shrink-0 rounded-full border-2 border-zinc-300 dark:border-zinc-600"></div>
+                            @endif
+                            <div>
+                                <flux:text class="font-medium">{{ $step['label'] }}</flux:text>
+                                <flux:text size="sm" class="opacity-70">{{ $step['text'] }}</flux:text>
+                            </div>
+                        </li>
+                    @endforeach
+                </ol>
+            </flux:card>
+        </div>
 
         <flux:card class="flex flex-col gap-4">
             <div>

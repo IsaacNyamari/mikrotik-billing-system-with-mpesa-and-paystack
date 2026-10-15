@@ -711,6 +711,22 @@ the only channel that always works, so what it contains has to be right the firs
   ethernet port with DHCP at 192.168.88.1 (the next free /24 if the HotSpot uses it). Only
   then the uplink, tunnel and HotSpot, any of which may fail on some board. Nothing in the
   file uses `:error`; a missing port is logged.
+- **The paste is one `{ }` block with pre-flight checks** (WAN port exists and has link,
+  the platform's host resolves, the download arrives). Pasted line by line, a failed check
+  printed its message and RouterOS carried on to the next line — including the reset.
+- **After the preamble, every section of the first-boot file is its own deferred block**
+  (tunnel, API user, HotSpot, HotSpot login pages, wifi, PPPoE), so one failure is logged as
+  `platform-setup: <section> skipped or failed` and the rest still runs. Production,
+  2026-10-15: the file stopped at `/ip/firewall/mangle add … place-before=0` — no rule 0 on a
+  wiped router — leaving no API user, no HotSpot and no wifi. `place-before` is now only used
+  when the list has rules. Deferred blocks drop comment lines and are kept under ~3 KB each,
+  because older RouterOS caps a string near 4 KB.
+- **`config_downloaded_at` and `hotspot_ready_at`** record onboarding for good
+  (`provision_fetched_at` is cleared with the next link). The setup page's Progress panel
+  polls `checkProgress()`, which runs the watcher at most every 15 s; the provisioning
+  endpoint also queues a watch 100 s after the download. `SetupFinisher` (called by the
+  watcher) confirms the HotSpot or builds it over the API with the remembered options, once
+  per 15 minutes, only for routers built by the platform's wipe.
 - **Commands for menus a board may lack go through `deferred()`** (`[[:parse "…"]]`):
   `/interface/wifi`, `/interface/wireless`, NTP servers, the uplink. A run-after-reset file
   is read whole before it runs, and one unrecognised command anywhere stops all of it —

@@ -769,6 +769,7 @@ class HotspotInstaller
             'hotspot_dns_name' => $plan['dns_name'],
             'with_hotspot' => true,
         ]);
+        $router->hotspot_ready_at = now();
         $router->save();
     }
 
