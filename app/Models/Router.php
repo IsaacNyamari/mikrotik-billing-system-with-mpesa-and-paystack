@@ -28,6 +28,9 @@ use Illuminate\Support\Str;
  * @property int $api_port
  * @property string $api_username
  * @property string $api_password
+ * @property string|null $admin_username
+ * @property string|null $admin_password
+ * @property string|null $wan_pppoe_password
  * @property bool $uses_tls
  * @property string|null $wg_private_key
  * @property string|null $wg_public_key
@@ -64,7 +67,9 @@ use Illuminate\Support\Str;
 ])]
 // The tunnel's private key is as sensitive as the API password: it is the router's identity
 // on the management network.
-#[Hidden(['api_password', 'wg_private_key'])]
+// The administrator password and the upstream PPPoE password are written into a rebuilt
+// router and are each a way into somebody's network.
+#[Hidden(['api_password', 'wg_private_key', 'admin_password', 'wan_pppoe_password'])]
 class Router extends Model
 {
     /** @use HasFactory<RouterFactory> */
@@ -102,6 +107,10 @@ class Router extends Model
             // The router's identity on the management network, and needed in cleartext to
             // write into the setup script.
             'wg_private_key' => 'encrypted',
+            // Written into the configuration a wiped router rebuilds itself from, so both are
+            // needed in cleartext — and neither may sit in the database as one.
+            'admin_password' => 'encrypted',
+            'wan_pppoe_password' => 'encrypted',
             'uses_tls' => 'boolean',
             'last_seen_at' => 'datetime',
             'wg_configured_at' => 'datetime',

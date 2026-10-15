@@ -7,6 +7,7 @@ use App\Models\PortalSetting;
 use App\Models\Router;
 use App\Support\PublicUrl;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 /**
  * The one paste that turns a stock MikroTik into a router this platform can run.
@@ -64,6 +65,21 @@ class RouterSetupScript
         $pppoeNetwork = (string) ($options['pppoe_network'] ?? $defaults['pppoe_network'] ?? '10.20.0.0/24');
         $pppoeGateway = (string) ($options['pppoe_gateway'] ?? $defaults['pppoe_gateway'] ?? '10.20.0.1');
 
+        // How the router's own internet arrives. Only a wipe uses it — an overlay leaves the
+        // uplink the router already has — but it is remembered either way.
+        $wanMode = (string) ($options['wan_mode'] ?? $defaults['wan_mode'] ?? 'dhcp');
+        $wanAddress = (string) ($options['wan_address'] ?? $defaults['wan_address'] ?? '');
+        $wanGateway = (string) ($options['wan_gateway'] ?? $defaults['wan_gateway'] ?? '');
+        $wanDns = (string) ($options['wan_dns'] ?? $defaults['wan_dns'] ?? '');
+        $wanPppoeUser = (string) ($options['wan_pppoe_user'] ?? $defaults['wan_pppoe_user'] ?? '');
+
+        // Kept off setup_options: it is the ISP's own provider's credential, and that column
+        // is plain JSON. Only replaced when one is given, so re-rendering the page does not
+        // wipe a password nobody retyped.
+        if (filled($options['wan_pppoe_password'] ?? null)) {
+            $router->wan_pppoe_password = (string) $options['wan_pppoe_password'];
+        }
+
         $network = (string) ($options['hotspot_network'] ?? $defaults['hotspot_network']);
         $gateway = (string) ($options['hotspot_gateway'] ?? $defaults['hotspot_gateway']);
         [$poolStart, $poolEnd] = $this->poolRange($network, $gateway);
@@ -101,7 +117,21 @@ class RouterSetupScript
             'pppoe_service_name' => $pppoeService,
             'pppoe_network' => $pppoeNetwork,
             'pppoe_gateway' => $pppoeGateway,
+            'wan_mode' => $wanMode,
+            'wan_address' => $wanAddress,
+            'wan_gateway' => $wanGateway,
+            'wan_dns' => $wanDns,
+            'wan_pppoe_user' => $wanPppoeUser,
         ];
+
+        // A reset puts `admin` back on the factory password — blank on older boards — so the
+        // rebuild disables it and hands the ISP an administrator of their own instead. Issued
+        // once and kept: the page regenerates the script on every render, and a password that
+        // changed each time would never match the one the router was actually built with.
+        if ($wipe) {
+            $router->admin_username ??= 'isp-admin';
+            $router->admin_password ??= Str::password(20, symbols: false);
+        }
 
         $router->api_username = $apiUser;
         $router->api_password = $apiPassword;
@@ -127,6 +157,11 @@ class RouterSetupScript
         // the router, then resets with run-after-reset pointing at it. What comes back is a
         // device configured from nothing.
         if ($wipe) {
+            // Checked before a link is issued rather than when the router fetches its file:
+            // an incomplete static or PPPoE uplink is a router that comes back unreachable,
+            // and the operator should hear about it while they can still correct it.
+            $this->uplink($router);
+
             return $this->bootstrap($router);
         }
 
@@ -166,12 +201,20 @@ class RouterSetupScript
     {
         $options = $router->setupOptions();
 
+        // A router whose wipe script predates the administrator account would otherwise be
+        // rebuilt with a full-rights user and an empty password — the very hole this file
+        // exists to close.
+        if (blank($router->admin_password)) {
+            $router->admin_username ??= 'isp-admin';
+            $router->admin_password = Str::password(20, symbols: false);
+            $router->save();
+        }
+
         $wgInterface = $this->name($options['interface_name']);
         $bridge = $this->name($options['bridge_name']);
         $hotspot = $this->name($options['hotspot_name']);
         $pool = $this->name($options['pool_name']);
         $lan = $this->name($options['lan_interface']);
-        $wan = $this->name($options['wan_interface'] ?? 'ether1');
         $apiUser = $this->name($options['api_username']);
         $apiGroup = $this->name($options['api_group']);
         $withHotspot = ($options['with_hotspot'] ?? true) === true;
@@ -185,7 +228,7 @@ class RouterSetupScript
         $portalHost = (string) (parse_url((string) config('app.url'), PHP_URL_HOST) ?: 'localhost');
 
         $lines = [
-            $this->resetPreamble($router, $wan),
+            $this->resetPreamble($router, $options),
             $this->tunnelSection($router, $wgInterface, $subnet),
             $this->apiSection($router, $wgInterface, $apiUser, $apiGroup, (string) $router->api_password, $serverAddress, $subnet, $this->subnet(config('wireguard.local_api_subnet'))),
         ];
@@ -214,7 +257,84 @@ class RouterSetupScript
 
         $lines[] = $this->closingSection($router);
 
+        // Nobody is watching a run-after-reset script: it runs before anyone can log in, and
+        // :put goes nowhere. The log is the only account of how far it got.
+        $lines[] = ':log info "platform-setup: complete"';
+
         return implode("\n", $lines)."\n";
+    }
+
+    /**
+     * How a wiped router reaches the internet, validated.
+     *
+     * Everything here is written into the router's configuration, and a mistake in any of it
+     * is a router that comes back from its reset with no way out — recoverable only by
+     * walking to it. So anything that is not plainly right is refused rather than sanitised
+     * into something that merely looks right.
+     *
+     * @return array{mode: string, interface: string, address: string, gateway: string, dns: string, user: string, password: string}
+     *
+     * @throws InvalidArgumentException
+     */
+    public function uplink(Router $router): array
+    {
+        $options = $router->setupOptions();
+        $mode = (string) ($options['wan_mode'] ?? 'dhcp');
+        $wan = $this->name($options['wan_interface'] ?? 'ether1');
+
+        $uplink = [
+            'mode' => $mode,
+            // A PPPoE uplink is its own interface on top of the port; everything that names
+            // "the way out" — NAT, the WAN list — has to name that, not the port.
+            'interface' => $mode === 'pppoe' ? 'pppoe-uplink' : $wan,
+            'address' => '',
+            'gateway' => '',
+            'dns' => '',
+            'user' => '',
+            'password' => '',
+        ];
+
+        if ($mode === 'dhcp') {
+            return $uplink;
+        }
+
+        if ($mode === 'static') {
+            $address = $this->subnet($options['wan_address'] ?? '');
+            $gateway = $this->subnet($options['wan_gateway'] ?? '');
+
+            if (! str_contains($address, '/') || $gateway === '' || str_contains($gateway, '/')) {
+                throw new InvalidArgumentException(__('A static uplink needs an address with its prefix (e.g. 196.201.1.10/29) and a gateway address.'));
+            }
+
+            $dns = [];
+
+            foreach (explode(',', (string) ($options['wan_dns'] ?? '')) as $server) {
+                $server = $this->subnet($server);
+
+                if ($server !== '' && ! str_contains($server, '/')) {
+                    $dns[] = $server;
+                }
+            }
+
+            return array_merge($uplink, [
+                'address' => $address,
+                'gateway' => $gateway,
+                'dns' => implode(',', $dns ?: ['1.1.1.1', '8.8.8.8']),
+            ]);
+        }
+
+        if ($mode === 'pppoe') {
+            $user = (string) preg_replace('/[^A-Za-z0-9@._\-]/', '', (string) ($options['wan_pppoe_user'] ?? ''));
+            $password = (string) $router->wan_pppoe_password;
+
+            if ($user === '' || $password === '') {
+                throw new InvalidArgumentException(__('A PPPoE uplink needs the username and password your provider gave you.'));
+            }
+
+            return array_merge($uplink, ['user' => $user, 'password' => $this->quoted($password)]);
+        }
+
+        throw new InvalidArgumentException(__('Choose how this router gets its internet: DHCP, a static address or PPPoE.'));
     }
 
     /**
@@ -238,6 +358,12 @@ class RouterSetupScript
         $options = $router->setupOptions();
         $wan = $this->name($options['wan_interface'] ?? 'ether1');
         $lan = $this->name($options['lan_interface']);
+        $uplink = match ((string) ($options['wan_mode'] ?? 'dhcp')) {
+            'static' => 'a static address',
+            'pppoe' => 'a PPPoE login',
+            default => 'DHCP',
+        };
+        $admin = $this->name($router->admin_username ?? 'isp-admin');
 
         return <<<SCRIPT
         # =====================================================================
@@ -248,12 +374,17 @@ class RouterSetupScript
         #
         #  Before you paste it, be certain of two things:
         #
-        #    * {$wan} is the port the router's internet comes in on.
+        #    * {$wan} is the port the router's internet comes in on, and it
+        #      gets that internet by {$uplink}.
         #    * {$lan} is the port your customers connect to.
         #
         #  If those are the wrong way round the router will come back with no
         #  way to reach the internet, and the only fix is to walk to it with a
         #  cable. Check them in /interface print first.
+        #
+        #  Afterwards the stock "admin" account is disabled. Log in as
+        #  "{$admin}" with the password on this router's setup page. Winbox
+        #  and SSH answer from the LAN only, never from the internet.
         #
         #  The link below works once and expires in {$minutes} minutes.
         # =====================================================================
@@ -280,12 +411,66 @@ class RouterSetupScript
     /**
      * What a wiped router needs before anything else works.
      *
-     * A reset takes away the uplink, NAT and every way in. Nothing else in this script would
-     * put them back, and a router that cannot reach the internet cannot reach us either.
+     * A reset takes away the uplink, NAT, the firewall and every safe way in, and puts `admin`
+     * back on its factory password — blank on older boards. Nothing else in this script would
+     * put any of that right, and a router that cannot reach the internet cannot reach us.
+     *
+     * Nobody is watching while this runs: it executes on the way up from a reboot, before
+     * anyone can log in. So it waits for conditions rather than for a guessed number of
+     * seconds, and it writes its progress to the router's log, which is the only place an
+     * operator can later find out how far it got.
+     *
+     * @param  array<string, mixed>  $options
      */
-    protected function resetPreamble(Router $router, string $wan): string
+    protected function resetPreamble(Router $router, array $options): string
     {
         $identity = $this->name($router->slug);
+        $wan = $this->name($options['wan_interface'] ?? 'ether1');
+        $lan = $this->name($options['lan_interface'] ?? 'ether3');
+        $uplink = $this->uplink($router);
+        $out = $uplink['interface'];
+        $endpoint = $this->name(config('wireguard.endpoint'));
+        $admin = $this->name($router->admin_username ?? 'isp-admin');
+        $adminPassword = $this->quoted((string) $router->admin_password);
+
+        $wayOut = match ($uplink['mode']) {
+            'static' => <<<SCRIPT
+            /ip/address
+            add address={$uplink['address']} interface="{$wan}" comment="Uplink"
+            /ip/route
+            add dst-address=0.0.0.0/0 gateway={$uplink['gateway']} comment="Uplink"
+            /ip/dns
+            set servers={$uplink['dns']}
+            SCRIPT,
+            'pppoe' => <<<SCRIPT
+            /interface/pppoe-client
+            add name="{$out}" interface="{$wan}" user="{$uplink['user']}" password="{$uplink['password']}" \\
+                add-default-route=yes use-peer-dns=yes disabled=no comment="Uplink"
+            SCRIPT,
+            default => <<<SCRIPT
+            /ip/dhcp-client
+            add interface="{$wan}" disabled=no add-default-route=yes use-peer-dns=yes comment="Uplink"
+            SCRIPT,
+        };
+
+        $wanMembers = $out === $wan
+            ? "add list=WAN interface=\"{$wan}\" comment=\"platform-base\""
+            : "add list=WAN interface=\"{$wan}\" comment=\"platform-base\"\nadd list=WAN interface=\"{$out}\" comment=\"platform-base\"";
+
+        // The address ranges customers are handed. They share the LAN with whoever looks
+        // after the router, so the management ports are closed to them by address: a customer
+        // who has paid for an hour of wifi has no business being offered a Winbox login.
+        $customerRules = [];
+
+        if (($options['with_hotspot'] ?? true) === true && ($network = $this->subnet($options['hotspot_network'] ?? '')) !== '') {
+            $customerRules[] = "add chain=input protocol=tcp dst-port=8291,22 src-address={$network} action=drop comment=\"platform-base: customers do not administer the router\"";
+        }
+
+        if (($options['with_pppoe'] ?? false) === true && ($network = $this->subnet($options['pppoe_network'] ?? '')) !== '') {
+            $customerRules[] = "add chain=input protocol=tcp dst-port=8291,22 src-address={$network} action=drop comment=\"platform-base: customers do not administer the router\"";
+        }
+
+        $customerRules = implode("\n", $customerRules);
 
         return <<<SCRIPT
         # =====================================================================
@@ -293,47 +478,158 @@ class RouterSetupScript
         #  Built from nothing after a reset. Do not edit — regenerate instead.
         # =====================================================================
 
-        :delay 5s;
+        :log info "platform-setup: starting"
         /system/identity set name="{$identity}"
 
+        # Interfaces are still appearing while a freshly reset router boots, and
+        # every command that names one fails until it exists. Wait for the two
+        # this configuration cannot do without.
+        :local waited 0
+        :while ((([:len [/interface find name="{$wan}"]] = 0) || ([:len [/interface find name="{$lan}"]] = 0)) && (\$waited < 60)) do={
+            :delay 1s
+            :set waited (\$waited + 1)
+        }
+        :if ([:len [/interface find name="{$wan}"]] = 0) do={
+            :log error "platform-setup: {$wan} never appeared. This router has no such port; regenerate the script with the right uplink."
+            :error "{$wan} never appeared"
+        }
+
         # ---------------------------------------------------------------------
-        # 0. The way out
+        # 0. The way out ({$uplink['mode']})
         #
-        # A reset leaves no DHCP client and no NAT, so this comes first: every
-        # other line here depends on the router being able to reach us.
+        # A reset leaves no uplink and no NAT, so this comes first: every other
+        # line here depends on the router being able to reach us.
         # ---------------------------------------------------------------------
 
-        /ip/dhcp-client
-        add interface="{$wan}" disabled=no add-default-route=yes use-peer-dns=yes comment="Uplink"
+        :log info "platform-setup: bringing up the uplink on {$wan}"
+
+        {$wayOut}
+
+        # ---------------------------------------------------------------------
+        # 0b. Which side is which
+        #
+        # WAN is the way out; LAN is every other interface, so a port, VLAN or
+        # tunnel added later lands on the safe side without anyone remembering
+        # to add it.
+        # ---------------------------------------------------------------------
+
+        /interface/list
+        add name=WAN comment="platform-base"
+        add name=LAN include=all exclude=WAN comment="platform-base"
+
+        /interface/list/member
+        {$wanMembers}
 
         /ip/firewall/nat
-        add chain=srcnat out-interface="{$wan}" action=masquerade comment="Uplink"
-
-        # Give DHCP a moment to actually get an address before anything tries to
-        # use the internet.
-        :delay 10s;
+        add chain=srcnat out-interface-list=WAN action=masquerade comment="Uplink"
 
         # ---------------------------------------------------------------------
-        # 0b. Keeping the router itself safe
+        # 0c. Keeping the router itself safe
         #
-        # A wiped MikroTik has no firewall at all. These are the rules the
-        # stock configuration would have given it, and without them the device
-        # is answering the whole internet.
+        # A wiped MikroTik has no firewall at all, and its admin is back on the
+        # factory password — blank on older boards. Without what follows, the
+        # device offers Winbox and SSH to the whole internet with no password.
+        #
+        # Input is closed to everything that does not come from the LAN. The
+        # tunnel is LAN too, which is how the platform keeps reaching it.
         # ---------------------------------------------------------------------
 
         /ip/firewall/filter
         add chain=input connection-state=established,related action=accept comment="platform-base"
         add chain=input connection-state=invalid action=drop comment="platform-base"
         add chain=input protocol=icmp action=accept comment="platform-base"
+        {$customerRules}
+        add chain=input in-interface-list=!LAN action=drop comment="platform-base: nothing from the internet"
         add chain=forward connection-state=established,related action=accept comment="platform-base"
         add chain=forward connection-state=invalid action=drop comment="platform-base"
+        add chain=forward connection-state=new connection-nat-state=!dstnat in-interface-list=WAN action=drop \\
+            comment="platform-base: nothing from the internet that was not forwarded on purpose"
 
         /ip/service
         set telnet disabled=yes
         set ftp disabled=yes
         set www disabled=yes
+        set www-ssl disabled=yes
         set api-ssl disabled=yes
+
+        # Layer-2 access (MAC Winbox, MAC telnet) and neighbour discovery work
+        # without an IP address at all, so the firewall above never sees them.
+        # Held to the LAN on their own.
+        /tool/mac-server set allowed-interface-list=LAN
+        /tool/mac-server/mac-winbox set allowed-interface-list=LAN
+        /ip/neighbor/discovery-settings set discover-interface-list=LAN
+        /tool/bandwidth-server set enabled=no
+
+        # ---------------------------------------------------------------------
+        # 0d. A way in for the ISP
+        #
+        # Day to day the router is run from the dashboard. This account is for
+        # when the platform cannot reach it — a dead uplink, a site visit — and
+        # its password is on the router's setup page. The stock admin is
+        # disabled, never left on a password printed in a manual.
+        # ---------------------------------------------------------------------
+
+        /user
+        add name="{$admin}" group=full password="{$adminPassword}" comment="ISP administrator"
+        :if ([:len [/user find name="{$admin}"]] > 0) do={
+            /user disable [find name="admin"]
+        }
+
+        # ---------------------------------------------------------------------
+        # 0e. Waiting for the internet
+        #
+        # Everything after this downloads something or dials the platform. On a
+        # slow uplink a fixed pause runs out first, and then the tunnel and the
+        # HotSpot pages fail with nobody there to see it.
+        # ---------------------------------------------------------------------
+
+        :log info "platform-setup: waiting for a default route"
+        :set waited 0
+        :while (([:len [/ip/route find where active and dst-address="0.0.0.0/0"]] = 0) && (\$waited < 120)) do={
+            :delay 1s
+            :set waited (\$waited + 1)
+        }
+        :if ([:len [/ip/route find where active and dst-address="0.0.0.0/0"]] = 0) do={
+            :log error "platform-setup: no route to the internet after 2 minutes. Check the uplink on {$wan}; carrying on so the rest is in place when it comes up."
+        }
+
+        :local resolved false
+        :set waited 0
+        :while ((!\$resolved) && (\$waited < 30)) do={
+            :do {
+                :resolve "{$endpoint}"
+                :set resolved true
+            } on-error={
+                :delay 2s
+                :set waited (\$waited + 1)
+            }
+        }
+        :if (!\$resolved) do={
+            :log error "platform-setup: cannot resolve {$endpoint}. The tunnel will keep retrying once DNS works."
+        }
+
+        # The board has no clock battery on most models. Without this every log
+        # line after a power cut reads 1970.
+        :do {
+            /system/ntp/client set enabled=yes
+            /system/ntp/client/servers add address=pool.ntp.org
+        } on-error={ :log warning "platform-setup: could not configure the NTP client" }
+
+        :log info "platform-setup: uplink ready, building the rest"
         SCRIPT;
+    }
+
+    /**
+     * A value safe inside a RouterOS double-quoted string.
+     *
+     * Backslash, quote and dollar are the three characters that mean something there; control
+     * characters have no business in a password and would break the line they sit on.
+     */
+    protected function quoted(string $value): string
+    {
+        $value = (string) preg_replace('/[\x00-\x1F\x7F]/', '', $value);
+
+        return str_replace(['\\', '"', '$'], ['\\\\', '\\"', '\\$'], $value);
     }
 
     /**
@@ -661,7 +957,7 @@ class RouterSetupScript
         # policy is deliberately left out. It would let this account create users with any
         # rights at all, which is the whole of the device rather than the part we need.
         /user/group
-        add name="{$group}" policy=read,write,test,api,sensitive,ftp \\
+        add name="{$group}" policy=read,write,test,api,sensitive,ftp,reboot \\
             comment="Platform provisioning: HotSpot users and portal files"
 
         /user

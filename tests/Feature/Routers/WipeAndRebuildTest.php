@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Routers;
 
+use App\Models\AuditLog;
 use App\Models\Router;
 use App\Models\Tenant;
 use App\Models\User;
@@ -12,6 +13,7 @@ use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\URL;
+use Livewire\Livewire;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\Concerns\InteractsWithRouters;
 use Tests\TestCase;
@@ -224,12 +226,237 @@ class WipeAndRebuildTest extends TestCase
             ->assertForbidden();
     }
 
-    protected function wipeScript(): string
+    #[Test]
+    public function nothing_from_the_internet_reaches_the_rebuilt_router(): void
     {
-        return app(RouterSetupScript::class)->for($this->router, [
+        $file = $this->configuration();
+
+        // The hole this closes: no final drop meant Winbox and SSH answered the WAN, on an
+        // admin account a reset had put back to a blank password.
+        $this->assertStringContainsString('add name=LAN include=all exclude=WAN', $file);
+        $this->assertStringContainsString('add list=WAN interface="ether1"', $file);
+        $this->assertStringContainsString('chain=input in-interface-list=!LAN action=drop', $file);
+        $this->assertStringContainsString('connection-nat-state=!dstnat in-interface-list=WAN action=drop', $file);
+        $this->assertStringContainsString('out-interface-list=WAN action=masquerade', $file);
+
+        // Layer-2 access never meets the firewall, so it is held to the LAN on its own.
+        $this->assertStringContainsString('/tool/mac-server set allowed-interface-list=LAN', $file);
+        $this->assertStringContainsString('/tool/mac-server/mac-winbox set allowed-interface-list=LAN', $file);
+        $this->assertStringContainsString('discover-interface-list=LAN', $file);
+        $this->assertStringContainsString('set www-ssl disabled=yes', $file);
+
+        // The final drop comes after the accepts, or it would drop those too.
+        $this->assertLessThan(
+            strpos($file, 'in-interface-list=!LAN action=drop'),
+            strpos($file, 'connection-state=established,related action=accept'),
+        );
+    }
+
+    #[Test]
+    public function customers_are_not_offered_a_winbox_login(): void
+    {
+        $file = $this->configuration();
+
+        $this->assertStringContainsString('dst-port=8291,22 src-address=10.10.10.0/24 action=drop', $file);
+    }
+
+    #[Test]
+    public function the_stock_admin_is_replaced_by_an_administrator_of_the_isps_own(): void
+    {
+        $file = $this->configuration();
+        $router = $this->router->fresh();
+
+        $this->assertSame('isp-admin', $router->admin_username);
+        $this->assertSame(20, strlen((string) $router->admin_password));
+        $this->assertStringContainsString('add name="isp-admin" group=full password="'.$router->admin_password.'"', $file);
+        $this->assertStringContainsString('/user disable [find name="admin"]', $file);
+
+        // Encrypted at rest, like every other router secret.
+        $raw = $router->getConnection()->table('routers')->where('id', $router->id)->value('admin_password');
+        $this->assertNotSame($router->admin_password, $raw);
+    }
+
+    #[Test]
+    public function the_administrator_password_does_not_change_each_time_the_page_renders(): void
+    {
+        $this->wipeScript();
+        $first = $this->router->fresh()->admin_password;
+
+        $this->wipeScript();
+        $this->wipeScript();
+
+        // A password that changed on every render would never match the one the router was
+        // actually built with.
+        $this->assertSame($first, $this->router->fresh()->admin_password);
+    }
+
+    #[Test]
+    public function a_router_rebuilt_without_an_administrator_password_is_given_one(): void
+    {
+        $this->wipeScript();
+
+        $router = $this->router->fresh();
+        $router->admin_password = null;
+        $router->save();
+
+        $file = app(RouterSetupScript::class)->configurationFile($router);
+
+        $this->assertNotEmpty($router->fresh()->admin_password);
+        $this->assertStringNotContainsString('password=""', $file);
+    }
+
+    #[Test]
+    public function a_static_uplink_is_written_with_its_route_and_dns(): void
+    {
+        $file = $this->configuration([
+            'wan_mode' => 'static',
+            'wan_address' => '196.201.1.10/29',
+            'wan_gateway' => '196.201.1.9',
+            'wan_dns' => '9.9.9.9, 149.112.112.112',
+        ]);
+
+        $this->assertStringContainsString('add address=196.201.1.10/29 interface="ether1" comment="Uplink"', $file);
+        $this->assertStringContainsString('add dst-address=0.0.0.0/0 gateway=196.201.1.9 comment="Uplink"', $file);
+        $this->assertStringContainsString('set servers=9.9.9.9,149.112.112.112', $file);
+        $this->assertStringNotContainsString('/ip/dhcp-client', $file);
+    }
+
+    #[Test]
+    public function an_incomplete_static_uplink_is_refused_before_any_link_is_issued(): void
+    {
+        try {
+            $this->wipeScript(['wan_mode' => 'static', 'wan_address' => '196.201.1.10', 'wan_gateway' => '']);
+            $this->fail('An incomplete static uplink produced a wipe script.');
+        } catch (\InvalidArgumentException) {
+            // Expected: a router built from it would come back with no way out.
+        }
+
+        $this->assertNull($this->router->fresh()->provision_token);
+    }
+
+    #[Test]
+    public function a_pppoe_uplink_dials_out_and_its_password_is_kept_encrypted(): void
+    {
+        $file = $this->configuration([
+            'wan_mode' => 'pppoe',
+            'wan_pppoe_user' => 'kwamwaura@fibre',
+            'wan_pppoe_password' => 'pa"ss$word\\x',
+        ]);
+
+        // The three characters that mean something inside a RouterOS string are escaped, so
+        // the password is the password and not the end of the command.
+        $this->assertStringContainsString('user="kwamwaura@fibre" password="pa\\"ss\\$word\\\\x"', $file);
+        $this->assertStringContainsString('add name="pppoe-uplink" interface="ether1"', $file);
+        $this->assertStringContainsString('add list=WAN interface="pppoe-uplink"', $file);
+
+        $router = $this->router->fresh();
+        $this->assertSame('pa"ss$word\\x', $router->wan_pppoe_password);
+        $this->assertArrayNotHasKey('wan_pppoe_password', $router->setup_options);
+    }
+
+    #[Test]
+    public function a_pppoe_uplink_without_a_password_is_refused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $this->wipeScript(['wan_mode' => 'pppoe', 'wan_pppoe_user' => 'kwamwaura@fibre']);
+    }
+
+    #[Test]
+    public function the_rebuild_waits_for_the_network_instead_of_guessing(): void
+    {
+        $file = $this->configuration();
+
+        $this->assertStringNotContainsString(':delay 10s;', $file);
+        $this->assertStringContainsString('[/interface find name="ether1"]', $file);
+        $this->assertStringContainsString('find where active and dst-address="0.0.0.0/0"', $file);
+        $this->assertStringContainsString(':resolve "isp.solforbs.com"', $file);
+        $this->assertStringContainsString('/system/ntp/client set enabled=yes', $file);
+
+        // Nobody watches a run-after-reset script; the log is the only account of it.
+        $this->assertStringContainsString(':log info "platform-setup: starting"', $file);
+        $this->assertStringContainsString(':log info "platform-setup: complete"', $file);
+
+        // The local variables are RouterOS's, not PHP's.
+        $this->assertStringContainsString('$waited < 60', $file);
+    }
+
+    #[Test]
+    public function the_platform_may_reboot_the_router(): void
+    {
+        $this->assertStringContainsString('policy=read,write,test,api,sensitive,ftp,reboot', $this->configuration());
+    }
+
+    #[Test]
+    public function viewing_the_administrator_password_is_audited(): void
+    {
+        $this->wipeScript();
+
+        $engineer = User::factory()->forTenant($this->tenant)->create();
+        $engineer->assignRole(Roles::NETWORK_ENGINEER);
+        $this->actingAs($engineer);
+
+        $password = (string) $this->router->fresh()->admin_password;
+
+        Livewire::test('pages::routers.setup', ['router' => $this->router])
+            ->assertDontSee($password)
+            ->call('revealAdminPassword')
+            ->assertSee($password);
+
+        $this->assertSame(1, AuditLog::query()->where('event', 'router.admin_password_revealed')->count());
+    }
+
+    #[Test]
+    public function the_pppoe_password_typed_on_the_page_is_stored_and_not_kept_in_the_page(): void
+    {
+        $engineer = User::factory()->forTenant($this->tenant)->create();
+        $engineer->assignRole(Roles::NETWORK_ENGINEER);
+        $this->actingAs($engineer);
+
+        Livewire::test('pages::routers.setup', ['router' => $this->router])
+            ->set('wipe', true)
+            ->set('wanMode', 'pppoe')
+            ->set('wanPppoeUser', 'kwamwaura@fibre')
+            ->set('wanPppoePassword', 'upstream-secret')
+            ->assertSet('wanPppoePassword', '')
+            ->assertSee('run-after-reset');
+
+        $this->assertSame('upstream-secret', $this->router->fresh()->wan_pppoe_password);
+    }
+
+    #[Test]
+    public function the_page_explains_an_incomplete_uplink_instead_of_showing_a_script(): void
+    {
+        $engineer = User::factory()->forTenant($this->tenant)->create();
+        $engineer->assignRole(Roles::NETWORK_ENGINEER);
+        $this->actingAs($engineer);
+
+        Livewire::test('pages::routers.setup', ['router' => $this->router])
+            ->set('wipe', true)
+            ->set('wanMode', 'static')
+            ->assertSee('No script until the uplink is complete')
+            ->assertDontSee('run-after-reset');
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     */
+    protected function configuration(array $options = []): string
+    {
+        $this->wipeScript($options);
+
+        return app(RouterSetupScript::class)->configurationFile($this->router->fresh());
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     */
+    protected function wipeScript(array $options = []): string
+    {
+        return app(RouterSetupScript::class)->for($this->router, array_merge([
             'wipe' => true,
             'lan_interface' => 'ether3',
             'wan_interface' => 'ether1',
-        ]);
+        ], $options));
     }
 }

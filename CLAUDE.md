@@ -212,6 +212,30 @@ would silently drop them.
 Run `php artisan router:test {slug}` to check a device: it reports identity, version, uptime and
 which menus the API user can actually reach.
 
+## The router console (Winbox from the dashboard)
+
+An ISP must be able to do everything from the dashboard that they would otherwise open Winbox
+for. `routers/{router}/console/{menu}` is one Livewire page over every RouterOS menu, because
+Winbox is itself a generic menu browser: a table, a form per row, enable/disable/remove.
+
+- A screen is a `ConsoleMenu` under `app/Services/RouterOs/Console/Menus` plus a line in
+  `ConsoleMenus`. It declares the path, the columns, the writable `fields()` with their
+  validation, and what it allows (add, edit, remove, toggle, row commands).
+- Every write goes through `RouterConsole`, which **sends only the properties the menu
+  offers**, re-reads the row from the device before acting, and audits as
+  `router.console.{action}` with old and new values.
+- **`protects()` keeps the platform's foothold out of reach**: the tunnel interface, the
+  uplink, anything the setup script commented (`platform-*`, "Managed by the platform"…), and
+  per menu what RouterOS manages itself (the HotSpot's dynamic queues). Disabling the tunnel
+  from a web page would succeed and then cut the page off for good. A row also cannot be
+  *given* a protected comment, or an ISP could lock their own config away.
+- Reading needs `view`; changing needs `command` (`routers.command`), the existing line
+  between looking at a device and reconfiguring it.
+- Commands run inline, not queued: each is tens of bytes and the operator is watching for it.
+- Menus so far: Interfaces, DHCP leases, Simple queues, Log. Anything the platform's API
+  group lacks a policy for (e.g. `reboot`) will be refused by the device until the setup
+  script grants it.
+
 ## Plans and RouterOS profiles
 
 A `Plan` is a business object. Its network settings are copied onto each router as a RouterOS
@@ -597,6 +621,25 @@ the only channel that always works, so what it contains has to be right the firs
 - Names interpolated into the script are stripped to `[A-Za-z0-9._-]`. They sit inside RouterOS
   quotes, and a name carrying one would produce a script that does something other than it
   appears to.
+- **Wipe and rebuild** (`wipe` option) pastes a short bootstrap that fetches the full
+  configuration and runs `reset-configuration no-defaults=yes run-after-reset=…`. A reset puts
+  `admin` back on the factory password (blank on the RB951) and leaves no firewall, so
+  `resetPreamble()` must, before anything else:
+  - bring up the uplink as DHCP, a static address or a PPPoE client (`wan_mode`); `uplink()`
+    refuses an incomplete one *before* a link is issued, because that router comes back
+    unreachable;
+  - create `WAN` and `LAN` (`include=all exclude=WAN`) lists, drop input from `!LAN`, drop new
+    forwarded traffic from WAN that was not dst-natted, and hold MAC server, MAC Winbox and
+    neighbour discovery to LAN — layer-2 access never meets the firewall;
+  - close Winbox and SSH to the customer address ranges, so a paying HotSpot user is never
+    offered a login;
+  - disable `admin` and create `routers.admin_username` (`isp-admin`) with a generated
+    password, kept encrypted and stable across renders. The setup page shows it only on
+    request, and that is audited. The upstream PPPoE password is encrypted on
+    `routers.wan_pppoe_password`, never in `setup_options`.
+  It waits on conditions (interfaces present, an active default route, the endpoint
+  resolving) rather than fixed delays, and writes `platform-setup:` lines to the router's log
+  — nobody can watch a run-after-reset script, so the log is the only account of it.
 - `wireguard:peers` renders the other half. WireGuard is mutual: a router that knows about us
   gets nowhere unless the server knows about it too. It prints rather than applies, because
   rewriting a live tunnel is not a side effect a report should have.

@@ -29,6 +29,29 @@ new #[Title('Router setup')] class extends Component {
 
     public string $wanInterface = '';
 
+    /** How the uplink gets its internet after a wipe: dhcp, static or pppoe. */
+    public string $wanMode = 'dhcp';
+
+    public string $wanAddress = '';
+
+    public string $wanGateway = '';
+
+    public string $wanDns = '';
+
+    public string $wanPppoeUser = '';
+
+    /**
+     * Never prefilled, and cleared the moment it is stored: it is the ISP's own provider's
+     * credential, and the component's state travels to the browser on every request.
+     */
+    public string $wanPppoePassword = '';
+
+    /** The ISP administrator's password stays hidden until somebody asks, and asking is audited. */
+    public bool $showAdminPassword = false;
+
+    /** Why the script could not be built, when it could not. */
+    protected ?string $scriptError = null;
+
     public bool $withHotspot = true;
 
     /** The wifi customers look for on their phone. */
@@ -60,6 +83,11 @@ new #[Title('Router setup')] class extends Component {
 
         $this->lanInterface = (string) $options['lan_interface'];
         $this->wanInterface = (string) ($options['wan_interface'] ?? 'ether1');
+        $this->wanMode = (string) ($options['wan_mode'] ?? 'dhcp');
+        $this->wanAddress = (string) ($options['wan_address'] ?? '');
+        $this->wanGateway = (string) ($options['wan_gateway'] ?? '');
+        $this->wanDns = (string) ($options['wan_dns'] ?? '');
+        $this->wanPppoeUser = (string) ($options['wan_pppoe_user'] ?? '');
         $this->withHotspot = (bool) ($options['with_hotspot'] ?? true);
         $this->wipe = (bool) ($options['wipe'] ?? false);
 
@@ -89,9 +117,34 @@ new #[Title('Router setup')] class extends Component {
     #[Computed]
     public function script(): string
     {
+        $this->scriptError = null;
+
+        try {
+            return $this->build();
+        } catch (InvalidArgumentException $e) {
+            // An uplink that is not filled in yet. Shown instead of a script, because a wipe
+            // built from it would bring the router back with no way out.
+            $this->scriptError = $e->getMessage();
+
+            return '';
+        }
+    }
+
+    public function scriptError(): ?string
+    {
+        return $this->scriptError;
+    }
+
+    protected function build(): string
+    {
         return app(RouterSetupScript::class)->for($this->router, [
             'lan_interface' => $this->lanInterface,
             'wan_interface' => $this->wanInterface,
+            'wan_mode' => in_array($this->wanMode, ['dhcp', 'static', 'pppoe'], true) ? $this->wanMode : 'dhcp',
+            'wan_address' => $this->wanAddress,
+            'wan_gateway' => $this->wanGateway,
+            'wan_dns' => $this->wanDns,
+            'wan_pppoe_user' => $this->wanPppoeUser,
             'with_hotspot' => $this->withHotspot,
             'wipe' => $this->wipe,
             'with_wireless' => $this->withWireless,
@@ -113,6 +166,45 @@ new #[Title('Router setup')] class extends Component {
     public function defaultSsid(): string
     {
         return \App\Models\PortalSetting::current()->displayName($this->router->tenant);
+    }
+
+    /**
+     * Store the upstream PPPoE password and forget it here.
+     */
+    public function updatedWanPppoePassword(): void
+    {
+        Gate::authorize(Permissions::ROUTERS_PROVISION);
+
+        if ($this->wanPppoePassword === '') {
+            return;
+        }
+
+        $router = $this->router;
+        $router->wan_pppoe_password = $this->wanPppoePassword;
+        $router->save();
+
+        $this->wanPppoePassword = '';
+
+        unset($this->router, $this->script);
+    }
+
+    /**
+     * Show the ISP administrator's password.
+     *
+     * It is the one credential that opens the whole device, so who looked at it, and when,
+     * goes on the audit trail.
+     */
+    public function revealAdminPassword(AuditLogger $audit): void
+    {
+        Gate::authorize(Permissions::ROUTERS_PROVISION);
+
+        $audit->record(
+            event: 'router.admin_password_revealed',
+            auditable: $this->router,
+            description: sprintf('Viewed the administrator password for %s', $this->router->name),
+        );
+
+        $this->showAdminPassword = true;
     }
 
     #[Computed]
@@ -351,6 +443,30 @@ new #[Title('Router setup')] class extends Component {
             </div>
 
             @if ($wipe)
+                <flux:radio.group wire:model.live="wanMode" :label="__('How does :port get its internet?', ['port' => $wanInterface ?: 'ether1'])" variant="segmented">
+                    <flux:radio value="dhcp" :label="__('DHCP')" />
+                    <flux:radio value="static" :label="__('Static address')" />
+                    <flux:radio value="pppoe" :label="__('PPPoE')" />
+                </flux:radio.group>
+
+                @if ($wanMode === 'static')
+                    <div class="grid gap-4 sm:grid-cols-3">
+                        <flux:input wire:model.live.debounce.500ms="wanAddress" :label="__('Address')" placeholder="196.201.1.10/29" :description="__('With its prefix.')" />
+                        <flux:input wire:model.live.debounce.500ms="wanGateway" :label="__('Gateway')" placeholder="196.201.1.9" />
+                        <flux:input wire:model.live.debounce.500ms="wanDns" :label="__('DNS servers')" placeholder="1.1.1.1,8.8.8.8" :description="__('Optional.')" />
+                    </div>
+                @elseif ($wanMode === 'pppoe')
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <flux:input wire:model.live.debounce.500ms="wanPppoeUser" :label="__('PPPoE username')" :description="__('From your internet provider.')" />
+                        <flux:input
+                            wire:model.blur="wanPppoePassword"
+                            type="password"
+                            :label="__('PPPoE password')"
+                            :description="$this->router->wan_pppoe_password ? __('Stored. Type a new one only to change it.') : __('Stored encrypted, never shown again.')"
+                        />
+                    </div>
+                @endif
+
                 <flux:switch
                     wire:model.live="withHotspot"
                     :label="__('Set up the HotSpot too')"
@@ -458,7 +574,7 @@ new #[Title('Router setup')] class extends Component {
                         variant="primary"
                         icon="clipboard-document"
                         x-on:click="
-                            navigator.clipboard.writeText($refs.script.textContent).then(() => {
+                            $refs.script && navigator.clipboard.writeText($refs.script.textContent).then(() => {
                                 copied = true;
                                 setTimeout(() => copied = false, 2000);
                             })
@@ -490,8 +606,43 @@ new #[Title('Router setup')] class extends Component {
                 </flux:callout>
             @endif
 
-            <pre x-ref="script" class="max-h-[32rem] overflow-auto rounded-lg bg-zinc-950 p-4 text-xs leading-relaxed text-zinc-100 dark:bg-black"><code>{{ $this->script }}</code></pre>
+            @php($script = $this->script)
+
+            @if ($this->scriptError() !== null)
+                <flux:callout variant="danger" icon="exclamation-triangle">
+                    <flux:callout.heading>{{ __('No script until the uplink is complete') }}</flux:callout.heading>
+                    <flux:callout.text>{{ $this->scriptError() }}</flux:callout.text>
+                </flux:callout>
+            @else
+                <pre x-ref="script" class="max-h-[32rem] overflow-auto rounded-lg bg-zinc-950 p-4 text-xs leading-relaxed text-zinc-100 dark:bg-black"><code>{{ $script }}</code></pre>
+            @endif
         </flux:card>
+
+        @if ($this->router->admin_password)
+            <flux:card class="flex flex-col gap-4">
+                <div>
+                    <flux:heading size="lg">{{ __('Administrator login') }}</flux:heading>
+                    <flux:subheading>
+                        {{ __('A wiped router disables the stock admin account and is rebuilt with this one. Use it in Winbox or SSH from the router\'s LAN when the platform cannot reach it. It is not reachable from the internet.') }}
+                    </flux:subheading>
+                </div>
+
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <flux:text size="sm" class="opacity-70">{{ __('Username') }}</flux:text>
+                        <flux:text class="font-mono">{{ $this->router->admin_username }}</flux:text>
+                    </div>
+                    <div>
+                        <flux:text size="sm" class="opacity-70">{{ __('Password') }}</flux:text>
+                        @if ($showAdminPassword)
+                            <flux:text class="font-mono select-all">{{ $this->router->admin_password }}</flux:text>
+                        @else
+                            <flux:button size="sm" icon="eye" wire:click="revealAdminPassword">{{ __('Show password') }}</flux:button>
+                        @endif
+                    </div>
+                </div>
+            </flux:card>
+        @endif
 
         <flux:card class="flex flex-col gap-4">
             <div>
