@@ -163,6 +163,9 @@ new #[Title('Router')] class extends Component {
                     <flux:button icon="wifi" :href="route('routers.hotspot', $router)" wire:navigate>
                         {{ __('HotSpot setup') }}
                     </flux:button>
+                    <flux:button icon="signal" :href="route('routers.pppoe', $router)" wire:navigate>
+                        {{ __('PPPoE setup') }}
+                    </flux:button>
                 @endcan
 
                 @can('provision', $router)

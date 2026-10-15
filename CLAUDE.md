@@ -278,6 +278,26 @@ payment providers, fasttrack removed, and the login pages fetched onto the devic
   to the technician port, tunnel or uplink is refused instead.
 - Saves what it built into `setup_options`, so the setup script and the wizard agree.
 
+### PPPoE setup and subscribers
+
+The sidebar's **PPPoE** group mirrors HotSpot: **Subscribers** (`pppoe`, every PPPoE line by
+payment standing: due in 3 days, cut for non-payment, never paid, suspended by hand), **PPPoE
+setup** (`routers/{router}/pppoe`), **Packages** (`plans?type=pppoe`) and **Online now** (the
+console's `ppp-active`). Lines are still created on the customer's page.
+
+`PppoeServerInstaller` (queued as `SetUpPppoe`, report polled from cache like HotSpot setup) is
+the setup script's PPPoE section over the API: an address pool, the `platform-pppoe` default
+profile, the PPPoE server on the chosen interface, and masquerade (`platform-pppoe`). It refuses
+the uplink, the tunnel, `bridge-tech`, a bridged port (offer the bridge), another service name
+already on that interface, and a network overlapping the HotSpot's or the management network.
+Re-runnable, and saves `with_pppoe`/`pppoe_*` into `setup_options`.
+
+**Package profiles carry the addresses** (`PlanProfileSynchroniser::pppProfile()`): a secret
+takes `local-address`/`remote-address` from its own profile, never from the server's default,
+so a package profile without them lets a subscriber authenticate and then get no IP. Once the
+router has PPPoE (`with_pppoe`), they are added from its `pppoe_gateway` and pool, and the
+installer re-pushes every PPPoE package at the end.
+
 ## Outages, compensation and logging back in
 
 `routers:watch` runs every minute and queues one `WatchRouter` job per router

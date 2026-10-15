@@ -38,7 +38,7 @@ class PlanProfileSynchroniser
         try {
             $connection = $this->connector->connect($router);
 
-            $pairing->routeros_id = $this->writeProfile($connection, $plan, $pairing->profile_name);
+            $pairing->routeros_id = $this->writeProfile($connection, $plan, $pairing->profile_name, $router);
 
             $connection->disconnect();
 
@@ -154,10 +154,10 @@ class PlanProfileSynchroniser
      * RouterOS profile names are unique per menu, and an ISP that built profiles by hand
      * before adopting the platform should not end up with two of everything.
      */
-    protected function writeProfile(RouterOsConnection $connection, Plan $plan, string $name): string
+    protected function writeProfile(RouterOsConnection $connection, Plan $plan, string $name, Router $router): string
     {
         $menu = $plan->type->profileMenu();
-        $attributes = $this->attributesFor($plan, $name);
+        $attributes = $this->attributesFor($plan, $name, $router);
 
         $existing = $connection->first($menu, ['name' => $name]);
 
@@ -176,11 +176,11 @@ class PlanProfileSynchroniser
     /**
      * @return array<string, string|int|bool>
      */
-    protected function attributesFor(Plan $plan, string $name): array
+    protected function attributesFor(Plan $plan, string $name, Router $router): array
     {
         return match ($plan->type) {
             PlanType::Hotspot => $this->hotspotProfile($plan, $name),
-            PlanType::Pppoe => $this->pppProfile($plan, $name),
+            PlanType::Pppoe => $this->pppProfile($plan, $name, $router),
         };
     }
 
@@ -214,7 +214,7 @@ class PlanProfileSynchroniser
     /**
      * @return array<string, string|int|bool>
      */
-    protected function pppProfile(Plan $plan, string $name): array
+    protected function pppProfile(Plan $plan, string $name, Router $router): array
     {
         $attributes = [
             'name' => $name,
@@ -222,6 +222,19 @@ class PlanProfileSynchroniser
             // replace the first rather than run alongside it.
             'only-one' => $plan->shared_users <= 1 ? 'yes' : 'no',
         ];
+
+        // A secret takes its addresses from its own profile, never from the server's default
+        // one. Without these a subscriber authenticates and then gets no IP, which looks like
+        // a connection that never finishes. They come from the router's PPPoE server, so only
+        // once there is one (PPPoE setup, or the setup script's PPPoE section).
+        $options = $router->setupOptions();
+
+        if (($options['with_pppoe'] ?? false) === true && filled($options['pppoe_gateway'] ?? null)) {
+            $attributes['local-address'] = (string) $options['pppoe_gateway'];
+            $attributes['remote-address'] = (string) ($options['pppoe_pool_name'] ?? (($options['hotspot_name'] ?? 'billing-hotspot').'-pppoe-pool'));
+            $attributes['dns-server'] = (string) ($options['pppoe_dns_servers'] ?? '1.1.1.1,8.8.8.8');
+            $attributes['change-tcp-mss'] = 'yes';
+        }
 
         if (($rate = $plan->routerOsRateLimit()) !== null) {
             $attributes['rate-limit'] = $rate;

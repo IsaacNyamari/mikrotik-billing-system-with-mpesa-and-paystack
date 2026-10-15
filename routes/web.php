@@ -91,6 +91,8 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
 
     // Winbox's HotSpot setup wizard, applied over the API to a router the platform can reach.
     Route::livewire('routers/{router}/hotspot', 'pages::routers.hotspot')->name('routers.hotspot');
+    Route::livewire('routers/{router}/pppoe', 'pages::routers.pppoe')->name('routers.pppoe');
+    Route::livewire('pppoe', 'pages::pppoe.index')->name('pppoe.index');
 
     // The sidebar's way in. Most ISPs have one router, and a link that lands on a list of one
     // to be clicked again is a step for nothing; the console itself switches between several.
@@ -103,10 +105,12 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
 
         return match ($section) {
             'hotspot' => redirect()->route('routers.hotspot', $router),
+            'pppoe' => redirect()->route('routers.pppoe', $router),
+            'pppoe-online' => redirect()->route('routers.console', ['router' => $router, 'menu' => 'ppp-active']),
             'bridges' => redirect()->route('routers.console', ['router' => $router, 'menu' => 'bridges']),
             default => redirect()->route('routers.console', $router),
         };
-    })->whereIn('section', ['hotspot', 'bridges'])->name('routers.manage');
+    })->whereIn('section', ['hotspot', 'pppoe', 'pppoe-online', 'bridges'])->name('routers.manage');
 
     Route::livewire('plans', 'pages::plans.index')->name('plans.index');
     Route::livewire('plans/create', 'pages::plans.form')->name('plans.create');
