@@ -6,7 +6,11 @@
 # privileges the web user must never hold. The privilege is drawn as narrowly as it goes:
 #
 #   * it takes no arguments, so there is nothing for a caller to inject into;
-#   * it only ever applies peers that are already in the database;
+#   * the application runs as www-data, never as root, and only *lists* the peers — so a
+#     log or cache file it writes is never left owned by root, where the website could no
+#     longer write to it;
+#   * every line it lists is checked against the shape of a key and an address on the
+#     management subnet before root acts on it;
 #   * it can add and update peers, and nothing else on this machine.
 #
 # The worst a compromised web user could do with it is re-apply peers that are already there.
@@ -16,7 +20,34 @@
 set -euo pipefail
 
 APP_DIR="${ISP_APP_DIR:-/var/www/isp}"
+IFACE="wg0"
+SUBNET_PREFIX="10.8.0."
 
 cd "$APP_DIR"
 
-exec /usr/bin/php artisan wireguard:peers --apply --interface=wg0
+peers="$(runuser -u www-data -- /usr/bin/php artisan wireguard:peers --plain)"
+
+applied=0
+while read -r key address; do
+    [ -z "${key:-}" ] && continue
+
+    # A Curve25519 public key is 32 bytes, base64: 43 characters and one "=".
+    if ! [[ "$key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+        echo "skipped a malformed key" >&2
+        continue
+    fi
+
+    if ! [[ "$address" =~ ^${SUBNET_PREFIX//./\\.}[0-9]{1,3}$ ]]; then
+        echo "skipped ${address}: not on the management subnet" >&2
+        continue
+    fi
+
+    wg set "$IFACE" peer "$key" allowed-ips "${address}/32"
+    applied=$((applied + 1))
+done <<<"$peers"
+
+# Written back to wg0.conf, so the peers survive a reboot of this server rather than living
+# only in the running interface until the next restart quietly drops every router.
+wg-quick save "$IFACE" >/dev/null 2>&1 || true
+
+echo "${applied} peer(s) applied"

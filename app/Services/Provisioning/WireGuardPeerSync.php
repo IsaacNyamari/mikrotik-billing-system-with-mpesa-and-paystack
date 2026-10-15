@@ -43,7 +43,9 @@ class WireGuardPeerSync
         if (! $this->isAvailable()) {
             return [
                 'ok' => false,
-                'message' => __('Automatic peer sync is not set up on this server. Run: php artisan wireguard:peers --apply'),
+                // No server command in this message: it is read by ISPs, who have no access to
+                // the server and should never be told to use it.
+                'message' => __('Automatic tunnel setup is not switched on for this platform yet. The platform administrator has been told.'),
             ];
         }
 

@@ -24,7 +24,8 @@ class WireguardPeersCommand extends Command
     protected $signature = 'wireguard:peers
         {--apply : Load the peers into the running interface with wg. Must run as root.}
         {--interface=wg0 : The management interface on this server.}
-        {--config : Print [Peer] blocks for wg0.conf instead of wg commands.}';
+        {--config : Print [Peer] blocks for wg0.conf instead of wg commands.}
+        {--plain : Print "public-key address" per line, for the root helper to apply.}';
 
     protected $description = 'Render the WireGuard peer entries for every router';
 
@@ -42,6 +43,14 @@ class WireguardPeersCommand extends Command
 
         if ($this->option('config')) {
             $this->line($this->asConfig($routers));
+
+            return self::SUCCESS;
+        }
+
+        // For deploy/bin/isp-wg-sync: the application lists, root applies. Nothing here runs
+        // with privileges, and the helper checks every line before it acts on it.
+        if ($this->option('plain')) {
+            $routers->each(fn (Router $router) => $this->line($router->wg_public_key.' '.$router->wg_address));
 
             return self::SUCCESS;
         }

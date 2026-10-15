@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\RouterStatus;
+use App\Jobs\SyncWireGuardPeers;
 use App\Models\Concerns\BelongsToTenant;
 use Carbon\CarbonImmutable;
 use Database\Factories\RouterFactory;
@@ -93,6 +94,15 @@ class Router extends Model
             // Identifies this device in public captive-portal URLs. Unguessable, so the
             // portal address gives away neither the ISP nor a sequential id.
             $router->portal_key ??= Str::lower(Str::random(24));
+        });
+
+        // The server's half of the tunnel, without anyone opening a terminal. Whenever a
+        // router is given keys or an address — first setup, a rotation — this server learns
+        // them too. After the commit, so the job never reads a key that was rolled back.
+        static::saved(function (self $router): void {
+            if ($router->wasChanged(['wg_public_key', 'wg_address']) || ($router->wasRecentlyCreated && $router->wg_public_key !== null)) {
+                SyncWireGuardPeers::dispatch()->afterCommit();
+            }
         });
     }
 

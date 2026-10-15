@@ -350,6 +350,18 @@ install_site() {
 }
 
 # ---------------------------------------------------------------------------
+say "Automatic tunnel setup"
+# ---------------------------------------------------------------------------
+# ISPs add routers from the dashboard and can never reach this server, so the server's half of
+# each tunnel has to be opened without anyone typing a command here. One narrow root helper,
+# one sudoers line, and the application is told how to call it.
+APP_DIR="$APP_DIR" bash "${APP_DIR}/deploy/install-wg-sync.sh" >/dev/null
+if ! grep -q '^WIREGUARD_SYNC_COMMAND=' "${APP_DIR}/.env"; then
+    printf '\nWIREGUARD_SYNC_COMMAND="sudo -n /usr/local/bin/isp-wg-sync"\n' >>"${APP_DIR}/.env"
+fi
+echo "  peers are added automatically"
+
+# ---------------------------------------------------------------------------
 say "nginx"
 # ---------------------------------------------------------------------------
 # The committed server block expects a certificate and nginx will not start without one. So

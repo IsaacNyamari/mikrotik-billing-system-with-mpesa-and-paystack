@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\SyncWireGuardPeers;
 use App\Models\Router;
 use App\Services\Provisioning\RouterSetupScript;
 use App\Support\Tenancy\Facades\Tenancy;
@@ -51,6 +52,10 @@ class RouterProvisionController extends Controller
                 'router' => $router->id,
                 'ip' => $request->ip(),
             ]);
+
+            // The router is about to reset and dial us. Make sure we will answer: a peer lost
+            // in a server rebuild would otherwise leave it knocking on a door nobody opens.
+            SyncWireGuardPeers::dispatch();
 
             $body = $scripts->configurationFile($router);
 

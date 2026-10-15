@@ -647,25 +647,27 @@ new #[Title('Router setup')] class extends Component {
         <flux:card class="flex flex-col gap-4">
             <div>
                 <flux:heading size="lg">{{ __('After it runs') }}</flux:heading>
-                <flux:subheading>{{ __('Both of these happen here — you should not need a terminal on the server.') }}</flux:subheading>
+                <flux:subheading>{{ __('Nothing here needs the server: the platform does its half by itself.') }}</flux:subheading>
             </div>
 
             <div class="flex flex-col gap-3">
                 <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
                     <div class="min-w-0 flex-1">
-                        <flux:heading size="sm">{{ __('1. Tell this server about the router') }}</flux:heading>
+                        <flux:heading size="sm">{{ __('1. The platform opens its side of the tunnel') }}</flux:heading>
                         <flux:text size="sm" class="opacity-70">
-                            {{ __('WireGuard is mutual — the router knowing about us is only half of it.') }}
+                            {{ $this->peerSyncIsAutomatic
+                                ? __('Done automatically when this router was given its keys, and again when it downloads its setup. Press to do it again now.')
+                                : __('Automatic tunnel setup is not switched on for this platform yet. The platform administrator needs to finish it; there is nothing for you to run.') }}
                         </flux:text>
                     </div>
 
                     @if ($this->peerSyncIsAutomatic)
-                        <flux:button size="sm" wire:click="syncPeer" wire:loading.attr="disabled" wire:target="syncPeer">
-                            <span wire:loading.remove wire:target="syncPeer">{{ __('Add peer') }}</span>
-                            <span wire:loading wire:target="syncPeer">{{ __('Adding…') }}</span>
+                        <flux:button size="sm" icon="arrow-path" wire:click="syncPeer" wire:loading.attr="disabled" wire:target="syncPeer">
+                            <span wire:loading.remove wire:target="syncPeer">{{ __('Sync tunnel') }}</span>
+                            <span wire:loading wire:target="syncPeer">{{ __('Syncing…') }}</span>
                         </flux:button>
                     @else
-                        <flux:text size="sm" class="font-mono opacity-70">php artisan wireguard:peers --apply</flux:text>
+                        <flux:badge color="amber" size="sm">{{ __('Not switched on') }}</flux:badge>
                     @endif
                 </div>
 
@@ -684,13 +686,15 @@ new #[Title('Router setup')] class extends Component {
                 </div>
             </div>
 
-            @unless ($this->peerSyncIsAutomatic)
+            {{-- Server instructions are for whoever runs the platform, never for an ISP: they have no
+                 access to the server and should not be shown how it is administered. --}}
+            @if (! $this->peerSyncIsAutomatic && auth()->user()->isSuperAdmin())
                 <flux:callout variant="warning" icon="command-line">
                     <flux:callout.text>
-                        {{ __('Adding a peer changes a live tunnel, which needs root — the web user deliberately does not have it. Run deploy/install-wg-sync.sh once on the server to allow this one command, and the button appears.') }}
+                        {{ __('Platform admin: adding a peer needs root. Run deploy/install-wg-sync.sh once on the server and set WIREGUARD_SYNC_COMMAND; tunnels are then opened automatically for every ISP.') }}
                     </flux:callout.text>
                 </flux:callout>
-            @endunless
+            @endif
 
             <flux:text size="sm" class="opacity-70">
                 {{ __('On the router itself, /interface/wireguard/peers print detail shows a recent last-handshake once it has reached us.') }}

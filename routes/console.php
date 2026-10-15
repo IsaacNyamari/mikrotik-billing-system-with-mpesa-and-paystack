@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\SyncWireGuardPeers;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -52,6 +53,11 @@ Schedule::command('billing:run')
     ->dailyAt('01:30')
     ->withoutOverlapping(60)
     ->runInBackground();
+
+// A safety net under the automatic sync that runs when a router is given keys: a server
+// restored from backup, or a peer added while the queue was down, is put right within ten
+// minutes without anybody noticing it was missing.
+Schedule::job(new SyncWireGuardPeers)->everyTenMinutes();
 
 // Every minute, because an outage is measured from it: it opens one when a router stops
 // answering, and when the router returns it closes it, gives customers back the time they
