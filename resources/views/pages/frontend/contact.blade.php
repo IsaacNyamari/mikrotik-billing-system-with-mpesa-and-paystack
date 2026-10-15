@@ -177,7 +177,7 @@ new #[Layout('components.layouts.frontend')] #[Title('Contact us')] class extend
                     <dl class="mt-4 space-y-3 text-sm">
                         <div>
                             <dt class="text-slate-500">{{ __('Email') }}</dt>
-                            <dd><a href="mailto:hello@solforbs.com" class="font-semibold text-brand-700 hover:underline">hello@solforbs.com</a></dd>
+                            <dd><a href="mailto:isp@humsols.com" class="font-semibold text-brand-700 hover:underline">isp@humsols.com</a></dd>
                         </div>
                         <div>
                             <dt class="text-slate-500">{{ __('Phone') }}</dt>
