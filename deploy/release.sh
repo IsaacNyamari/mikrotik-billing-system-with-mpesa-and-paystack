@@ -160,8 +160,11 @@ echo "==> Restart"
 # restarted it by hand.
 fpm="$(systemctl list-units --type=service --state=running --no-legend 'php*-fpm.service' 2>/dev/null | awk '{print $1}' | head -1)"
 if [ -n "$fpm" ]; then
-    systemctl restart "$fpm"
-    echo "  restarted ${fpm}"
+    # Reload, not restart: on a shared box the pool serves other sites, and a restart drops
+    # their requests mid-flight. A reload replaces the workers gracefully, which clears opcache
+    # just the same. Restart only if the reload is refused.
+    systemctl reload "$fpm" 2>/dev/null || systemctl restart "$fpm"
+    echo "  reloaded ${fpm}"
 else
     echo "  WARNING: no running php-fpm service found; opcache may still hold the old build." >&2
 fi

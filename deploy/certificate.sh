@@ -91,6 +91,16 @@ socket="$(ls /run/php/php[0-9]*-fpm.sock 2>/dev/null | sort -V | tail -1)"
 socket="${socket:-/run/php/php8.3-fpm.sock}"
 sed "s|unix:/run/php/php[0-9.]*-fpm\.sock|unix:${socket}|g"     "${APP_DIR}/deploy/nginx/${APP_DOMAIN}.conf"     > "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
 chmod 644 "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
+
+# `http2 on;` is nginx 1.25.1 and later. Ubuntu 24.04 ships 1.24, which rejects it — and a
+# block that fails `nginx -t` sitting in sites-enabled breaks the next reload for every other
+# site on the box. On an older nginx the same thing is said the older way.
+nginx_ver="$(nginx -v 2>&1 | sed -n 's|.*nginx/\([0-9.]*\).*|\1|p')"
+if [ -n "$nginx_ver" ] && [ "$(printf '%s\n' "$nginx_ver" 1.25.1 | sort -V | head -1)" != "1.25.1" ]; then
+    sed -i -E -e 's/^(\s*)listen (\[::\]:)?443 ssl;/\1listen \2443 ssl http2;/' -e '/^\s*http2 on;/d' \
+        "/etc/nginx/sites-available/${APP_DOMAIN}.conf"
+    echo "  nginx ${nginx_ver}: http2 set on the listen line"
+fi
 echo "  fpm socket: ${socket}"
 ln -sfn "/etc/nginx/sites-available/${APP_DOMAIN}.conf" "/etc/nginx/sites-enabled/${APP_DOMAIN}.conf"
 
