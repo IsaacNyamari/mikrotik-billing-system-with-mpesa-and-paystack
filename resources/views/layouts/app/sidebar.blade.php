@@ -46,9 +46,19 @@
 
                 @can('viewAny', App\Models\Router::class)
                     <flux:sidebar.group :heading="__('Network')" class="grid">
-                        <flux:sidebar.item icon="server" :href="route('routers.index')" :current="request()->routeIs('routers.*')" wire:navigate>
+                        <flux:sidebar.item icon="server" :href="route('routers.index')" :current="request()->routeIs('routers.*') && ! request()->routeIs('routers.console', 'routers.hotspot')" wire:navigate>
                             {{ __('Routers') }}
                         </flux:sidebar.item>
+
+                        <flux:sidebar.item icon="squares-2x2" :href="route('routers.manage')" :current="request()->routeIs('routers.console')" wire:navigate>
+                            {{ __('Router console') }}
+                        </flux:sidebar.item>
+
+                        @can(App\Support\Authorization\Permissions::ROUTERS_PROVISION)
+                            <flux:sidebar.item icon="signal" :href="route('routers.manage', ['section' => 'hotspot'])" :current="request()->routeIs('routers.hotspot')" wire:navigate>
+                                {{ __('HotSpot setup') }}
+                            </flux:sidebar.item>
+                        @endcan
 
                         <flux:sidebar.item icon="chart-bar" :href="route('monitor.index')" :current="request()->routeIs('monitor.*')" wire:navigate>
                             {{ __('MikroTik Monitor') }}

@@ -6,6 +6,7 @@ use App\Http\Controllers\PaystackWebhookController;
 use App\Http\Controllers\PlatformMpesaCallbackController;
 use App\Http\Controllers\PlatformPaystackWebhookController;
 use App\Http\Controllers\RouterProvisionController;
+use App\Models\Router;
 use Illuminate\Support\Facades\Route;
 
 // The public site. Anyone reading these has internet, so unlike the captive portal these
@@ -81,6 +82,21 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
 
     // The device's own configuration, menu by menu — what an ISP would otherwise open Winbox for.
     Route::livewire('routers/{router}/console/{menu?}', 'pages::routers.console')->name('routers.console');
+
+    // Winbox's HotSpot setup wizard, applied over the API to a router the platform can reach.
+    Route::livewire('routers/{router}/hotspot', 'pages::routers.hotspot')->name('routers.hotspot');
+
+    // The sidebar's way in. Most ISPs have one router, and a link that lands on a list of one
+    // to be clicked again is a step for nothing; the console itself switches between several.
+    Route::get('router-console/{section?}', function (?string $section = null) {
+        $router = Router::query()->orderBy('name')->first();
+
+        if ($router === null) {
+            return redirect()->route('routers.index');
+        }
+
+        return redirect()->route($section === 'hotspot' ? 'routers.hotspot' : 'routers.console', $router);
+    })->whereIn('section', ['hotspot'])->name('routers.manage');
 
     Route::livewire('plans', 'pages::plans.index')->name('plans.index');
     Route::livewire('plans/create', 'pages::plans.form')->name('plans.create');

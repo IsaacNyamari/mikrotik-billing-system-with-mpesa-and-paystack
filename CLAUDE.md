@@ -249,6 +249,28 @@ Winbox is itself a generic menu browser: a table, a form per row, enable/disable
   rather than written as `""`, which RouterOS refuses for most properties; only `comment`
   and fields marked `clearable` are cleared.
 
+### HotSpot setup
+
+`routers/{router}/hotspot` is Winbox's HotSpot Setup wizard applied over the API, for a
+router the platform can already reach (one it cannot is set up by pasting its script).
+The sidebar's **Router console** and **HotSpot setup** go through `routers.manage`, which
+lands on the first router; the console switches between several.
+
+`HotspotInstaller` does what the wizard does — address on the interface, pool, DHCP server
+and network, DNS (`allow-remote-requests`), server profile, the HotSpot, masquerade — then
+what the wizard does not and this platform needs: the walled garden for the portal and the
+payment providers, fasttrack removed, and the login pages fetched onto the device.
+
+- Runs as the queued `SetUpHotspot` job; the page polls a cache entry for the step report.
+- **Re-runnable**: each step replaces what the last run made (by name or `platform-`
+  comment) instead of adding a second, so it doubles as "fix my HotSpot".
+- Core steps stop at the first failure — a DHCP server pointing at a pool that was never
+  made looks configured and is not. Walled garden and pages report separately.
+- Refuses the uplink, the tunnel, a port that is in a bridge (offer the bridge), an
+  interface that already has another DHCP server or HotSpot, and a public address range.
+- A gateway in the middle of the network gives a pool of two ranges around it.
+- Saves what it built into `setup_options`, so the setup script and the wizard agree.
+
 ## Outages, compensation and logging back in
 
 `routers:watch` runs every minute and queues one `WatchRouter` job per router

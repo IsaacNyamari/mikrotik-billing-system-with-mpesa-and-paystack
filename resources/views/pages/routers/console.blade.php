@@ -63,6 +63,22 @@ new #[Title('Router console')] class extends Component {
     }
 
     /**
+     * Every router this ISP has, for switching without leaving the console.
+     *
+     * @return \Illuminate\Support\Collection<int, Router>
+     */
+    #[Computed]
+    public function routers(): \Illuminate\Support\Collection
+    {
+        return Router::query()->orderBy('name')->get(['id', 'name', 'slug']);
+    }
+
+    public function switchRouter(string $slug): void
+    {
+        $this->redirectRoute('routers.console', ['router' => $slug, 'menu' => $this->menuKey], navigate: true);
+    }
+
+    /**
      * @return array<string, array<string, ConsoleMenu>>
      */
     #[Computed]
@@ -296,7 +312,23 @@ new #[Title('Router console')] class extends Component {
 
         <div class="flex items-start gap-6 max-md:flex-col">
             <nav class="w-full shrink-0 md:w-56">
+                @if ($this->routers->count() > 1)
+                    <flux:select class="mb-4" wire:change="switchRouter($event.target.value)" :label="__('Router')">
+                        @foreach ($this->routers as $option)
+                            <flux:select.option :value="$option->slug" :selected="$option->id === $router->id">{{ $option->name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                @endif
+
                 <flux:navlist aria-label="{{ __('Router console') }}">
+                    @can('provision', $router)
+                        <flux:navlist.group :heading="__('Setup')" class="mb-2">
+                            <flux:navlist.item icon="sparkles" :href="route('routers.hotspot', $router)" wire:navigate>
+                                {{ __('HotSpot setup') }}
+                            </flux:navlist.item>
+                        </flux:navlist.group>
+                    @endcan
+
                     @foreach ($this->menus as $group => $items)
                         <flux:navlist.group :heading="$group" class="mb-2">
                             @foreach ($items as $key => $item)
