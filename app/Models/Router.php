@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
@@ -206,6 +208,32 @@ class Router extends Model
     public function portalUrl(): string
     {
         return route('portal', ['portalKey' => $this->portal_key]);
+    }
+
+    /**
+     * @return HasMany<RouterOutage, $this>
+     */
+    public function outages(): HasMany
+    {
+        return $this->hasMany(RouterOutage::class);
+    }
+
+    /**
+     * The outage still going on, if there is one.
+     *
+     * @return HasOne<RouterOutage, $this>
+     */
+    public function openOutage(): HasOne
+    {
+        return $this->hasOne(RouterOutage::class)->whereNull('ended_at')->latestOfMany('started_at');
+    }
+
+    /**
+     * @return HasMany<HotspotUser, $this>
+     */
+    public function hotspotUsers(): HasMany
+    {
+        return $this->hasMany(HotspotUser::class);
     }
 
     public function getRouteKeyName(): string

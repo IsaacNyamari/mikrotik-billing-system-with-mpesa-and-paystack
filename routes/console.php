@@ -53,8 +53,12 @@ Schedule::command('billing:run')
     ->withoutOverlapping(60)
     ->runInBackground();
 
-// Keeps the dashboard's view of each device honest, and records outages.
-Schedule::command('router:test')
-    ->everyFiveMinutes()
-    ->withoutOverlapping(15)
+// Every minute, because an outage is measured from it: it opens one when a router stops
+// answering, and when the router returns it closes it, gives customers back the time they
+// lost and logs the ones who were online back in. It also keeps device health current, which
+// router:test used to do every five minutes. Each router is its own queued job, so a dead site
+// waiting out its timeout never delays a live one.
+Schedule::command('routers:watch')
+    ->everyMinute()
+    ->withoutOverlapping(5)
     ->runInBackground();

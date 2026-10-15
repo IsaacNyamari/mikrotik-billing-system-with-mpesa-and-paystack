@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\HotspotUserStatus;
 use App\Models\HotspotUser;
+use App\Models\RouterOutage;
 use App\Models\Tenant;
 use App\Services\RouterOs\HotspotUserProvisioner;
 use App\Support\Tenancy\Facades\Tenancy;
@@ -36,7 +37,12 @@ class HotspotSweepCommand extends Command
         foreach ($tenants as $tenant) {
             Tenancy::forTenant($tenant, function () use ($provisioner, &$removed, &$failed, &$retried): void {
                 // Eager loaded because each one needs its router to be contacted.
-                HotspotUser::query()->due()->with(['router', 'plan'])->chunkById(100, function ($due) use ($provisioner, &$removed, &$failed): void {
+                // Not on a router that is down, or has just come back and not yet been
+                // reconciled: those customers are owed the outage first. Expiring them here
+                // would remove somebody whose time the watcher is about to extend.
+                $down = RouterOutage::query()->open()->select('router_id');
+
+                HotspotUser::query()->due()->whereNotIn('router_id', $down)->with(['router', 'plan'])->chunkById(100, function ($due) use ($provisioner, &$removed, &$failed): void {
                     foreach ($due as $user) {
                         $provisioner->remove($user, HotspotUserStatus::Expired);
 
@@ -53,6 +59,7 @@ class HotspotSweepCommand extends Command
                 HotspotUser::query()
                     ->where('status', HotspotUserStatus::Failed)
                     ->where('expires_at', '>', now())
+                    ->whereNotIn('router_id', RouterOutage::query()->open()->select('router_id'))
                     ->with(['router', 'plan'])
                     ->chunkById(100, function ($stuck) use ($provisioner, &$retried): void {
                         foreach ($stuck as $user) {

@@ -232,9 +232,58 @@ Winbox is itself a generic menu browser: a table, a form per row, enable/disable
 - Reading needs `view`; changing needs `command` (`routers.command`), the existing line
   between looking at a device and reconfiguring it.
 - Commands run inline, not queued: each is tens of bytes and the operator is watching for it.
-- Menus so far: Interfaces, DHCP leases, Simple queues, Log. Anything the platform's API
-  group lacks a policy for (e.g. `reboot`) will be refused by the device until the setup
-  script grants it.
+- Menus: HotSpot (online, users, profiles, devices, IP bindings, walled garden), PPP
+  (connected, users, profiles), Interfaces, IP (addresses, pools, DHCP leases, routes, DNS),
+  Firewall (NAT, rules, address lists), Simple queues, Identity, Log — plus a Reboot button.
+  A policy the platform's API group lacks (`reboot` on routers set up before it was added)
+  is refused by the device until the setup script is pasted again.
+- **What the platform keeps in step is shown, not edited** (`PlatformRecords`): profiles
+  pushed from a plan, HotSpot packages sold through the portal, PPPoE secrets that belong to
+  a service account. Editing the device copy would be reverted by the next sync, or worse,
+  leave the device and the books disagreeing. The message says where to change it instead.
+- **Firewall filter rules cannot be added**, only labelled, toggled and removed. Order is
+  meaning there: appended after the final drop a rule never matches, placed above the API
+  guard it can open the router. Blocking somebody goes through an address list.
+- Dynamic rows (`dynamic=true`) are RouterOS's own and are read-only, except on menus that
+  are dynamic by nature (leases, sessions, hosts). An empty field on an edit is left alone
+  rather than written as `""`, which RouterOS refuses for most properties; only `comment`
+  and fields marked `clearable` are cleared.
+
+## Outages, compensation and logging back in
+
+`routers:watch` runs every minute and queues one `WatchRouter` job per router
+(`--sync` runs them inline, for a laptop with no worker). `RouterWatcher` does one of three
+things per router:
+
+- **No answer** (`RouterStatus::Offline` only — `Error` means it answered): open a
+  `RouterOutage`, `started_at` = the router's previous `last_seen_at`. Measured generously on
+  purpose: a minute too long costs the ISP a minute, too short costs them a customer.
+- **Answers with an outage open**: close it and read the cause off the device. Uptime says
+  whether it restarted during the outage (else `Connectivity`); if it did, its log says
+  "rebooted without proper shutdown" after a power cut (`Power`) and not after a clean
+  restart (`Reboot`). The log is in memory and starts afresh at boot, so that line is there
+  exactly when it is needed. Then `OutageCompensator` runs.
+- **Answers normally**: note each HotSpot session's MAC and address on its `hotspot_users`
+  row (`last_mac_address`, `last_online_at`). That is what makes re-login possible later.
+
+`OutageCompensator` gives each customer the part of the outage that fell inside *their*
+package (from purchase or outage start, to expiry or outage end), skipping anything under a
+minute, adds it to `expires_at`, and re-pushes the user so the device comment agrees. One
+`outage_compensations` row per customer per outage (unique index, `createOrFirst`) makes it
+exactly-once however often the recovery is seen. `Failed` packages count: that is somebody
+who paid while the router was unreachable.
+
+`HotspotRelogin` logs customers who were online back in with `/ip/hotspot/active/login`
+(user, password, the noted MAC, and the address the MAC has *now* — DHCP may have changed
+it). Retried every minute for 30 minutes because phones take a while to rejoin; gives up
+after that or five refusals. A customer who signed in themselves counts as done.
+
+**`hotspot:sweep` skips routers with an open outage.** Otherwise the first minute a router
+answers again, the sweeper would expire the very customers the watcher is about to extend.
+
+Customers are told on the captive portal (`outageNotice()`): exactly how much time their own
+package gained, or, for everyone else, that it happened and running packages were credited.
+Shown for three hours after recovery. The ISP sees outages on the router page.
 
 ## Plans and RouterOS profiles
 
@@ -510,7 +559,9 @@ The code itself is always shown, because it is theirs and the SMS has it anyway.
   for while a router was down. A package that expired while stuck is *not* resurrected.
 - `payments:reconcile` every minute — asks each provider what became of payments still waiting,
   for the customers who paid and then closed the page.
-- `router:test` every five minutes — keeps device health honest and records outages.
+- `routers:watch` every minute — device health, outages, compensation and re-login (see
+  above). Needs a queue worker in production (`isp-queue.service`). `router:test` remains as
+  the terminal diagnostic.
 
 The scheduler must actually be running: `php artisan schedule:work`.
 

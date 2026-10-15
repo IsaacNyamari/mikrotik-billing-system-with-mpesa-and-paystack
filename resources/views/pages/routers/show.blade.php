@@ -1,10 +1,12 @@
 <?php
 
 use App\Models\Router;
+use App\Models\RouterOutage;
 use App\Services\RouterOs\Contracts\RouterOsConnector;
 use App\Services\RouterOs\RouterHealthProbe;
 use App\Support\Audit\AuditLogger;
 use Flux\Flux;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Title;
@@ -65,6 +67,21 @@ new #[Title('Router')] class extends Component {
         $this->router->status->isReachable()
             ? Flux::toast(variant: 'success', text: __('Connected.'))
             : Flux::toast(variant: 'danger', text: $this->router->last_error ?? __('Could not reach the router.'));
+    }
+
+    /**
+     * The last outages, newest first: when, how long, why, and what was given back.
+     *
+     * @return Collection<int, RouterOutage>
+     */
+    #[Computed]
+    public function outages(): Collection
+    {
+        return RouterOutage::query()
+            ->where('router_id', $this->router->id)
+            ->latest('started_at')
+            ->limit(10)
+            ->get();
     }
 
     /**
@@ -247,6 +264,71 @@ Its payments and earnings history are kept. The configuration already on the dev
                 @endif
             </flux:card>
         </div>
+
+        @php($outages = $this->outages)
+        @php($ongoing = $outages->first(fn ($outage) => $outage->isOpen()))
+
+        @if ($ongoing)
+            <flux:callout variant="danger" icon="bolt-slash">
+                <flux:callout.heading>
+                    {{ __('Down since :time (:duration)', ['time' => $ongoing->started_at->setTimezone($router->tenant->timezone ?: config('app.timezone'))->format('D H:i'), 'duration' => $ongoing->durationForHumans()]) }}
+                </flux:callout.heading>
+                <flux:callout.text>
+                    {{ __('Customers with a running package will be given this time back, and those who were online logged back in, as soon as the router answers again. Nothing for you to do here.') }}
+                </flux:callout.text>
+            </flux:callout>
+        @endif
+
+        <flux:card class="flex flex-col gap-4">
+            <div>
+                <flux:heading size="lg">{{ __('Outages') }}</flux:heading>
+                <flux:subheading>{{ __('Checked every minute. When the router returns, lost package time is given back and customers who were online are logged in again.') }}</flux:subheading>
+            </div>
+
+            @if ($outages->isEmpty())
+                <flux:text>{{ __('No outages recorded.') }}</flux:text>
+            @else
+                @php($timezone = $router->tenant->timezone ?: config('app.timezone'))
+
+                <flux:table>
+                    <flux:table.columns>
+                        <flux:table.column>{{ __('Went down') }}</flux:table.column>
+                        <flux:table.column>{{ __('Back') }}</flux:table.column>
+                        <flux:table.column>{{ __('Duration') }}</flux:table.column>
+                        <flux:table.column>{{ __('Cause') }}</flux:table.column>
+                        <flux:table.column>{{ __('Customers credited') }}</flux:table.column>
+                        <flux:table.column>{{ __('Time given back') }}</flux:table.column>
+                        <flux:table.column>{{ __('Logged back in') }}</flux:table.column>
+                    </flux:table.columns>
+
+                    <flux:table.rows>
+                        @foreach ($outages as $outage)
+                            <flux:table.row :key="$outage->id">
+                                <flux:table.cell>{{ $outage->started_at->setTimezone($timezone)->format('d M H:i') }}</flux:table.cell>
+                                <flux:table.cell>
+                                    @if ($outage->ended_at)
+                                        {{ $outage->ended_at->setTimezone($timezone)->format('d M H:i') }}
+                                    @else
+                                        <flux:badge size="sm" color="red">{{ __('still down') }}</flux:badge>
+                                    @endif
+                                </flux:table.cell>
+                                <flux:table.cell>{{ $outage->durationForHumans() }}</flux:table.cell>
+                                <flux:table.cell>
+                                    @if ($outage->cause)
+                                        <flux:badge size="sm" :color="$outage->cause->color()">{{ $outage->cause->label() }}</flux:badge>
+                                    @else
+                                        —
+                                    @endif
+                                </flux:table.cell>
+                                <flux:table.cell>{{ $outage->compensated_at ? $outage->affected_users : '—' }}</flux:table.cell>
+                                <flux:table.cell>{{ $outage->credited_seconds > 0 ? App\Models\RouterOutage::humanDuration($outage->credited_seconds) : '—' }}</flux:table.cell>
+                                <flux:table.cell>{{ $outage->compensated_at ? $outage->relogged_users : '—' }}</flux:table.cell>
+                            </flux:table.row>
+                        @endforeach
+                    </flux:table.rows>
+                </flux:table>
+            @endif
+        </flux:card>
 
         @if ($router->notes)
             <flux:card>

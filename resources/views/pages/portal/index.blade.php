@@ -6,6 +6,7 @@ use App\Models\HotspotUser;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Router;
+use App\Models\RouterOutage;
 use App\Services\Mpesa\CallbackProcessor;
 use App\Services\Mpesa\PaymentCollector;
 use App\Services\Payments\PaymentReconciler;
@@ -212,6 +213,63 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
         }
 
         return $this->payment?->hotspotUser;
+    }
+
+    /**
+     * What to tell customers about a recent outage, if anything.
+     *
+     * Somebody who lost twenty minutes of a package they paid for deserves to hear that it was
+     * noticed and given back, not to wonder whether the wifi is broken or they were cheated. A
+     * customer whose own package was extended is told exactly how much; everybody else on the
+     * portal is told it happened and that running packages were credited.
+     *
+     * Shown for a few hours after the router came back, then dropped: an apology for
+     * yesterday's power cut is noise to somebody buying their first hour today.
+     *
+     * @return array{title: string, text: string}|null
+     */
+    #[Computed]
+    public function outageNotice(): ?array
+    {
+        $timezone = (string) ($this->tenant->timezone ?: config('app.timezone'));
+
+        $personal = $this->access?->compensations()
+            ->with('outage')
+            ->where('created_at', '>=', now()->subDay())
+            ->first();
+
+        if ($personal !== null && $personal->outage !== null) {
+            $outage = $personal->outage;
+
+            return [
+                'title' => __('Sorry for the interruption'),
+                'text' => __('Your connection was down from :from because of :cause. We have added :time to your package.', [
+                    'from' => $outage->started_at->setTimezone($timezone)->format('H:i'),
+                    'cause' => ($outage->cause ?? \App\Enums\OutageCause::Unknown)->forCustomers(),
+                    'time' => RouterOutage::humanDuration($personal->credited_seconds),
+                ]),
+            ];
+        }
+
+        $recent = RouterOutage::query()
+            ->where('router_id', $this->router->id)
+            ->whereNotNull('ended_at')
+            ->where('ended_at', '>=', now()->subHours(3))
+            ->latest('ended_at')
+            ->first();
+
+        if ($recent === null || $recent->durationSeconds() < 60) {
+            return null;
+        }
+
+        return [
+            'title' => __('We are back online'),
+            'text' => __('The wifi was down from :from to :to because of :cause. Everyone whose package was running has been given that time back.', [
+                'from' => $recent->started_at->setTimezone($timezone)->format('H:i'),
+                'to' => $recent->ended_at?->setTimezone($timezone)->format('H:i'),
+                'cause' => ($recent->cause ?? \App\Enums\OutageCause::Unknown)->forCustomers(),
+            ]),
+        ];
     }
 
     /**
@@ -575,6 +633,13 @@ new #[Layout('components.layouts.portal')] #[Title('Get online')] class extends 
             <p class="portal__sub">{{ $this->branding->intro_text }}</p>
         @endif
     </header>
+
+    @if ($this->outageNotice)
+        <div class="note note--warn" role="status">
+            <h2 class="note__title">{{ $this->outageNotice['title'] }}</h2>
+            <p class="note__text">{{ $this->outageNotice['text'] }}</p>
+        </div>
+    @endif
 
     {{-- One screen for "you have paid and here is your access", whether the payment happened
          thirty seconds ago or yesterday and the customer typed their code to get back. From

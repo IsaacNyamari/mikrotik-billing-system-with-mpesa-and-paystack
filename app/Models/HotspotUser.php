@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * One purchased HotSpot package.
@@ -42,6 +43,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $used_bytes
  * @property string|null $routeros_id
  * @property string|null $last_error
+ * @property string|null $last_mac_address
+ * @property string|null $last_ip_address
+ * @property CarbonImmutable|null $last_online_at
+ * @property int $compensated_seconds
  */
 #[Fillable([
     'plan_id',
@@ -70,6 +75,7 @@ class HotspotUser extends Model
         'status' => 'pending',
         'source' => 'purchase',
         'amount' => 0,
+        'compensated_seconds' => 0,
     ];
 
     /**
@@ -87,6 +93,7 @@ class HotspotUser extends Model
             'provisioned_at' => 'datetime',
             'first_seen_at' => 'datetime',
             'removed_at' => 'datetime',
+            'last_online_at' => 'datetime',
         ];
     }
 
@@ -112,6 +119,16 @@ class HotspotUser extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * Time given back for outages, newest first.
+     *
+     * @return HasMany<OutageCompensation, $this>
+     */
+    public function compensations(): HasMany
+    {
+        return $this->hasMany(OutageCompensation::class)->latest('id');
     }
 
     /**
