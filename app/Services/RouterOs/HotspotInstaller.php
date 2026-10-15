@@ -449,11 +449,30 @@ class HotspotInstaller
             }
         }
 
-        // An address the operator already put on this interface in this network would clash.
-        foreach ($connection->get('/ip/address', ['interface' => $plan['interface']]) as $row) {
-            if (($row['network'] ?? '').'/'.$plan['prefix'] === $plan['network'] && ($row['dynamic'] ?? 'false') !== 'true') {
-                $connection->remove('/ip/address', $row['.id']);
+        // Any other address in this network, on *any* interface. One network on two interfaces
+        // is a router that cannot decide where to send its replies: the DHCP server and the
+        // HotSpot go invalid and phones sit on "obtaining IP address" forever. Seen on a real
+        // router, with the HotSpot's gateway left on the technician bridge.
+        //
+        // Except where the platform itself depends on that address: those are refused, so the
+        // operator picks another network rather than losing the way in.
+        foreach ($connection->get('/ip/address') as $row) {
+            if (($row['dynamic'] ?? 'false') === 'true' || ($row['network'] ?? '').'/'.$plan['prefix'] !== $plan['network']) {
+                continue;
             }
+
+            if (in_array($row['comment'] ?? '', ['Technician access', 'Management address', 'Uplink'], true)) {
+                throw new InvalidArgumentException(__(':network is already the router\'s :what network. Choose another local address, such as 10.10.10.1/24.', [
+                    'network' => $plan['network'],
+                    'what' => match ($row['comment']) {
+                        'Technician access' => __('technician'),
+                        'Management address' => __('management'),
+                        default => __('internet'),
+                    },
+                ]));
+            }
+
+            $connection->remove('/ip/address', $row['.id']);
         }
 
         $connection->add('/ip/address', [
