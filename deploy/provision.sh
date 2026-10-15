@@ -57,6 +57,10 @@ say() { printf '\n==> %s\n' "$1"; }
 say "Packages"
 # ---------------------------------------------------------------------------
 export DEBIAN_FRONTEND=noninteractive
+# On a shared box, needrestart's default is to restart every service using an upgraded
+# library the moment apt finishes — other people's sites included. List them instead; whoever
+# owns those services can restart them when it suits them.
+export NEEDRESTART_MODE=l
 apt-get update -qq
 
 # Asked for by name, but only the ones this release actually packages. Which extensions ship
@@ -128,6 +132,11 @@ echo "  extensions present"
 # ---------------------------------------------------------------------------
 say "Deploy key for the private repository"
 # ---------------------------------------------------------------------------
+# Only for an SSH remote. A public repository cloned over HTTPS needs no key at all, and
+# insisting on one would stop the script at a step that has nothing to do.
+if [[ "$REPO" != git@* ]]; then
+    echo "  ${REPO} is not an SSH remote; no key needed"
+else
 # A read-only deploy key rather than an account token: it is scoped to this one repository, so
 # a server that is compromised cannot reach anything else the account owns.
 mkdir -p /root/.ssh
@@ -172,6 +181,7 @@ if ! grep -q "successfully authenticated" <<<"$github_auth"; then
     exit 1
 fi
 echo "  github reachable"
+fi
 
 # ---------------------------------------------------------------------------
 say "Database"
