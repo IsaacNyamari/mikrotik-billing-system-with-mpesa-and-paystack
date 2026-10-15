@@ -53,7 +53,8 @@
                         <div class="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 in-data-flux-sidebar-collapsed-desktop:hidden dark:text-zinc-500">{{ __('Operations & network') }}</div>
                         <flux:sidebar.group expandable :expanded="request()->routeIs('routers.*') && ! request()->routeIs('routers.hotspot')" icon="server-stack" :heading="__('Network')" class="grid">
                             <flux:sidebar.item :href="route('routers.index')" :current="request()->routeIs('routers.index', 'routers.show', 'routers.create', 'routers.edit', 'routers.setup')" wire:navigate>{{ __('Routers') }}</flux:sidebar.item>
-                            <flux:sidebar.item :href="route('routers.manage')" :current="request()->routeIs('routers.console')" wire:navigate>{{ __('Router console') }}</flux:sidebar.item>
+                            <flux:sidebar.item :href="route('routers.manage')" :current="request()->routeIs('routers.console') && ! in_array(request()->route('menu'), ['bridges', 'bridge-ports'], true)" wire:navigate>{{ __('Router console') }}</flux:sidebar.item>
+                            <flux:sidebar.item :href="route('routers.manage', ['section' => 'bridges'])" :current="request()->routeIs('routers.console') && in_array(request()->route('menu'), ['bridges', 'bridge-ports'], true)" wire:navigate>{{ __('Bridges') }}</flux:sidebar.item>
                         </flux:sidebar.group>
 
                         <flux:sidebar.group expandable :expanded="request()->routeIs('plans.*', 'settings.portal', 'routers.hotspot')" icon="wifi" :heading="__('Hotspot')" class="grid">

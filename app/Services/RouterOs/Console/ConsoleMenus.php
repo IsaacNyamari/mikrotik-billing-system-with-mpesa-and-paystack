@@ -3,6 +3,8 @@
 namespace App\Services\RouterOs\Console;
 
 use App\Services\RouterOs\Console\Menus\AddressListsMenu;
+use App\Services\RouterOs\Console\Menus\BridgePortsMenu;
+use App\Services\RouterOs\Console\Menus\BridgesMenu;
 use App\Services\RouterOs\Console\Menus\DhcpLeasesMenu;
 use App\Services\RouterOs\Console\Menus\DnsStaticMenu;
 use App\Services\RouterOs\Console\Menus\FirewallFilterMenu;
@@ -45,6 +47,8 @@ class ConsoleMenus
         PppSecretsMenu::class,
         PppProfilesMenu::class,
         InterfacesMenu::class,
+        BridgesMenu::class,
+        BridgePortsMenu::class,
         IpAddressesMenu::class,
         IpPoolsMenu::class,
         DhcpLeasesMenu::class,

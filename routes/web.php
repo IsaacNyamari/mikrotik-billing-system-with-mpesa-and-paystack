@@ -95,8 +95,12 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
             return redirect()->route('routers.index');
         }
 
-        return redirect()->route($section === 'hotspot' ? 'routers.hotspot' : 'routers.console', $router);
-    })->whereIn('section', ['hotspot'])->name('routers.manage');
+        return match ($section) {
+            'hotspot' => redirect()->route('routers.hotspot', $router),
+            'bridges' => redirect()->route('routers.console', ['router' => $router, 'menu' => 'bridges']),
+            default => redirect()->route('routers.console', $router),
+        };
+    })->whereIn('section', ['hotspot', 'bridges'])->name('routers.manage');
 
     Route::livewire('plans', 'pages::plans.index')->name('plans.index');
     Route::livewire('plans/create', 'pages::plans.form')->name('plans.create');
