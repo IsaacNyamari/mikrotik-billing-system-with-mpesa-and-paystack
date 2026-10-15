@@ -694,10 +694,22 @@ the only channel that always works, so what it contains has to be right the firs
 - Names interpolated into the script are stripped to `[A-Za-z0-9._-]`. They sit inside RouterOS
   quotes, and a name carrying one would produce a script that does something other than it
   appears to.
-- **Wipe and rebuild** (`wipe` option) pastes a short bootstrap that fetches the full
-  configuration and runs `reset-configuration no-defaults=yes run-after-reset=…`. A reset puts
-  `admin` back on the factory password (blank on the RB951) and leaves no firewall, so
-  `resetPreamble()` must, before anything else:
+- **Wipe and rebuild is the default** (`wipe`, keeping a configuration has to be chosen). The
+  paste fetches the full configuration (onto `flash/` where the board has one) and resets
+  through a stored `/system/script`, because typed at the terminal `reset-configuration`
+  stops to ask "Reset anyway?" and the paste then appears to do nothing.
+- **The way in is built first** (production, 2026-10-15: a wiped RB951 came back invisible
+  to Winbox). `resetPreamble()` opens with the ISP administrator, MAC Winbox and neighbour
+  discovery on **all** interfaces, and a `bridge-tech` technician bridge on every spare
+  ethernet port with DHCP at 192.168.88.1 (the next free /24 if the HotSpot uses it). Only
+  then the uplink, tunnel and HotSpot, any of which may fail on some board. Nothing in the
+  file uses `:error`; a missing port is logged.
+- **Commands for menus a board may lack go through `deferred()`** (`[[:parse "…"]]`):
+  `/interface/wifi`, `/interface/wireless`, NTP servers, the uplink. A run-after-reset file
+  is read whole before it runs, and one unrecognised command anywhere stops all of it —
+  the router comes back blank with its radio off.
+- A reset puts `admin` back on the factory password (blank on the RB951) and leaves no
+  firewall, so the preamble also must:
   - bring up the uplink as DHCP, a static address or a PPPoE client (`wan_mode`); `uplink()`
     refuses an incomplete one *before* a link is issued, because that router comes back
     unreachable;

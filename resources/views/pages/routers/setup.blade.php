@@ -69,7 +69,7 @@ new #[Title('Router setup')] class extends Component {
     public string $pppoeService = '';
 
     /** Whether the script erases the router first. Never the default. */
-    public bool $wipe = false;
+    public bool $wipe = true;
 
     public function mount(Router $router): void
     {
@@ -89,7 +89,7 @@ new #[Title('Router setup')] class extends Component {
         $this->wanDns = (string) ($options['wan_dns'] ?? '');
         $this->wanPppoeUser = (string) ($options['wan_pppoe_user'] ?? '');
         $this->withHotspot = (bool) ($options['with_hotspot'] ?? true);
-        $this->wipe = (bool) ($options['wipe'] ?? false);
+        $this->wipe = (bool) ($options['wipe'] ?? true);
 
         $this->withWireless = (bool) ($options['with_wireless'] ?? true);
         $this->wirelessInterface = (string) ($options['wireless_interface'] ?? 'wlan1');

@@ -50,10 +50,11 @@ class RouterSetupScript
         $apiGroup = $this->name($options['api_group'] ?? $defaults['api_group']);
         $withHotspot = ($options['with_hotspot'] ?? true) === true;
 
-        // Wiping the device is deliberate and never the default. It is the right answer for a
-        // router straight out of its box, and the wrong one for a router already carrying an
-        // ISP's own configuration.
-        $wipe = ($options['wipe'] ?? $defaults['wipe'] ?? false) === true;
+        // Wiping is the default: every router is built from nothing, so what is on it is
+        // exactly what the platform knows about and nothing left over from before can get in
+        // the way. Keeping an ISP's existing configuration is still possible, but it has to be
+        // chosen.
+        $wipe = ($options['wipe'] ?? $defaults['wipe'] ?? true) === true;
 
         $wireless = $this->name($options['wireless_interface'] ?? $defaults['wireless_interface'] ?? 'wlan1');
         $ssid = $this->ssid($options['ssid'] ?? $defaults['ssid'] ?? null, $router);
@@ -384,41 +385,63 @@ class RouterSetupScript
         #
         #  Afterwards the stock "admin" account is disabled. Log in as
         #  "{$admin}" with the password on this router's setup page. Winbox
-        #  and SSH answer from the LAN only, never from the internet.
+        #  answers by MAC on any port, and by IP on any spare port, which
+        #  gives a plugged-in laptop an address (192.168.88.x by default).
+        #  Never from the internet.
         #
         #  The link below works once and expires in {$minutes} minutes.
         # =====================================================================
 
         # 1. Fetch the configuration onto the router. It has to be on the device
         #    before the reset, because the reset reboots immediately and takes
-        #    the rest of this paste with it.
-        /tool/fetch url="{$url}" mode={$mode} dst-path=platform-setup.rsc check-certificate=no
+        #    the rest of this paste with it. Boards with a flash/ folder keep
+        #    only what is in it across a reboot, so it goes there when present.
+        :if ([:len [/file find name="flash"]] > 0) do={
+            /tool/fetch url="{$url}" mode={$mode} dst-path=flash/platform-setup.rsc check-certificate=no
+        } else={
+            /tool/fetch url="{$url}" mode={$mode} dst-path=platform-setup.rsc check-certificate=no
+        }
 
         # 2. Make sure it actually arrived. Resetting without it would leave the
         #    router wiped, unconfigured and unreachable.
-        :if ([:len [/file find name="platform-setup.rsc"]] = 0) do={
+        :if ([:len [/file find where name~"platform-setup.rsc"]] = 0) do={
             :error "Download failed — the router has no internet, or cannot reach the platform. Nothing has been changed."
         }
 
-        # 3. Wipe, then run what we just downloaded on the way back up.
-        #    no-defaults means the MikroTik defaults are not restored either:
-        #    the file below is the entire configuration.
-        :put "Resetting. The router will reboot and come back in a minute or two.";
-        /system/reset-configuration no-defaults=yes skip-backup=yes run-after-reset=platform-setup.rsc
+        # 3. Wipe at once, reboot, and run what we just downloaded on the way
+        #    back up. Run as a stored script because typed at the terminal the
+        #    reset stops to ask "Reset anyway? [y/N]" — and a paste waiting on
+        #    a question nobody sees looks exactly like nothing happening.
+        #    no-defaults: the MikroTik defaults are not restored either; the
+        #    downloaded file is the entire configuration.
+        /system/script remove [find name="platform-reset"]
+        :if ([:len [/file find name="flash/platform-setup.rsc"]] > 0) do={
+            /system/script add name="platform-reset" source="/system/reset-configuration no-defaults=yes skip-backup=yes run-after-reset=flash/platform-setup.rsc"
+        } else={
+            /system/script add name="platform-reset" source="/system/reset-configuration no-defaults=yes skip-backup=yes run-after-reset=platform-setup.rsc"
+        }
+        :put "Resetting now. The router reboots and comes back configured in a minute or two.";
+        /system/script run platform-reset
         SCRIPT;
     }
 
     /**
-     * What a wiped router needs before anything else works.
+     * What a wiped router needs before anything else works — and, first of all, a way in.
      *
      * A reset takes away the uplink, NAT, the firewall and every safe way in, and puts `admin`
      * back on its factory password — blank on older boards. Nothing else in this script would
      * put any of that right, and a router that cannot reach the internet cannot reach us.
      *
-     * Nobody is watching while this runs: it executes on the way up from a reboot, before
-     * anyone can log in. So it waits for conditions rather than for a guessed number of
-     * seconds, and it writes its progress to the router's log, which is the only place an
-     * operator can later find out how far it got.
+     * **Access comes before everything that can fail.** Nobody is watching this run: it
+     * executes on the way up from a reboot. If it stops halfway, whatever it had not reached
+     * yet stays missing — and a router that stopped before its way in is one nobody can open,
+     * not even in Winbox. So the first thing it does is make the device reachable on a cable:
+     * the ISP's administrator, MAC Winbox on every port, and a technician port that hands a
+     * laptop an address. Only then the uplink, the tunnel and the HotSpot, any of which may
+     * fail on a given board without costing anyone the router.
+     *
+     * It waits for conditions rather than guessed delays, and logs its progress — the router's
+     * log is the only place anyone can later see how far it got.
      *
      * @param  array<string, mixed>  $options
      */
@@ -427,39 +450,28 @@ class RouterSetupScript
         $identity = $this->name($router->slug);
         $wan = $this->name($options['wan_interface'] ?? 'ether1');
         $lan = $this->name($options['lan_interface'] ?? 'ether3');
+        $pppoeInterface = ($options['with_pppoe'] ?? false) === true ? $this->name($options['pppoe_interface'] ?? 'ether4') : '';
         $uplink = $this->uplink($router);
         $out = $uplink['interface'];
         $endpoint = $this->name(config('wireguard.endpoint'));
         $admin = $this->name($router->admin_username ?? 'isp-admin');
         $adminPassword = $this->quoted((string) $router->admin_password);
+        [$techAddress, $techNetwork, $techPool] = $this->technicianNetwork($options);
 
-        $wayOut = match ($uplink['mode']) {
-            'static' => <<<SCRIPT
-            /ip/address
-            add address={$uplink['address']} interface="{$wan}" comment="Uplink"
-            /ip/route
-            add dst-address=0.0.0.0/0 gateway={$uplink['gateway']} comment="Uplink"
-            /ip/dns
-            set servers={$uplink['dns']}
-            SCRIPT,
-            'pppoe' => <<<SCRIPT
-            /interface/pppoe-client
-            add name="{$out}" interface="{$wan}" user="{$uplink['user']}" password="{$uplink['password']}" \\
-                add-default-route=yes use-peer-dns=yes disabled=no comment="Uplink"
-            SCRIPT,
-            default => <<<SCRIPT
-            /ip/dhcp-client
-            add interface="{$wan}" disabled=no add-default-route=yes use-peer-dns=yes comment="Uplink"
-            SCRIPT,
-        };
+        $wayOut = $this->deferred(match ($uplink['mode']) {
+            'static' => "/ip/address add address={$uplink['address']} interface=\"{$wan}\" comment=\"Uplink\"\n"
+                ."/ip/route add dst-address=0.0.0.0/0 gateway={$uplink['gateway']} comment=\"Uplink\"\n"
+                ."/ip/dns set servers={$uplink['dns']}",
+            'pppoe' => "/interface/pppoe-client add name=\"{$out}\" interface=\"{$wan}\" user=\"{$uplink['user']}\" password=\"{$uplink['password']}\" add-default-route=yes use-peer-dns=yes disabled=no comment=\"Uplink\"\n"
+                ."/interface/list/member add list=WAN interface=\"{$out}\" comment=\"platform-base\"",
+            default => "/ip/dhcp-client add interface=\"{$wan}\" disabled=no add-default-route=yes use-peer-dns=yes comment=\"Uplink\"",
+        }, 'the uplink on '.$wan);
 
-        $wanMembers = $out === $wan
-            ? "add list=WAN interface=\"{$wan}\" comment=\"platform-base\""
-            : "add list=WAN interface=\"{$wan}\" comment=\"platform-base\"\nadd list=WAN interface=\"{$out}\" comment=\"platform-base\"";
+        $ntp = $this->deferred("/system/ntp/client set enabled=yes\n/system/ntp/client/servers add address=pool.ntp.org", 'the NTP client');
 
-        // The address ranges customers are handed. They share the LAN with whoever looks
-        // after the router, so the management ports are closed to them by address: a customer
-        // who has paid for an hour of wifi has no business being offered a Winbox login.
+        // The address ranges customers are handed. Winbox and SSH are closed to them by
+        // address: a customer who has paid for an hour of wifi has no business being offered a
+        // login. The technician port is not one of them.
         $customerRules = [];
 
         if (($options['with_hotspot'] ?? true) === true && ($network = $this->subnet($options['hotspot_network'] ?? '')) !== '') {
@@ -476,41 +488,70 @@ class RouterSetupScript
         # =====================================================================
         #  {$router->name}
         #  Built from nothing after a reset. Do not edit — regenerate instead.
+        #
+        #  If this router is ever unreachable, plug a laptop into any spare
+        #  port: it is given an address and Winbox answers at {$techAddress}.
         # =====================================================================
 
         :log info "platform-setup: starting"
         /system/identity set name="{$identity}"
 
-        # Interfaces are still appearing while a freshly reset router boots, and
-        # every command that names one fails until it exists. Wait for the two
-        # this configuration cannot do without.
+        # Interfaces are still appearing while a freshly reset router boots.
+        # Wait for the two this configuration names, but never stop over them:
+        # a missing port costs that part of the setup, not the way in.
         :local waited 0
         :while ((([:len [/interface find name="{$wan}"]] = 0) || ([:len [/interface find name="{$lan}"]] = 0)) && (\$waited < 60)) do={
             :delay 1s
             :set waited (\$waited + 1)
         }
         :if ([:len [/interface find name="{$wan}"]] = 0) do={
-            :log error "platform-setup: {$wan} never appeared. This router has no such port; regenerate the script with the right uplink."
-            :error "{$wan} never appeared"
+            :log error "platform-setup: {$wan} never appeared. This board has no such port; regenerate the script with the right uplink. Carrying on."
         }
 
         # ---------------------------------------------------------------------
-        # 0. The way out ({$uplink['mode']})
+        # 0. A way in, before anything else
         #
-        # A reset leaves no uplink and no NAT, so this comes first: every other
-        # line here depends on the router being able to reach us.
+        # Everything after this can fail on some board without leaving the
+        # router locked. This cannot be allowed to.
         # ---------------------------------------------------------------------
 
-        :log info "platform-setup: bringing up the uplink on {$wan}"
+        # The ISP's own administrator. The stock admin is back on its factory
+        # password after a reset — blank on older boards — so it is disabled,
+        # but only once this account demonstrably exists.
+        /user add name="{$admin}" group=full password="{$adminPassword}" comment="ISP administrator"
+        :if ([:len [/user find name="{$admin}"]] > 0) do={
+            /user disable [find name="admin"]
+        }
 
-        {$wayOut}
+        # Winbox over MAC works with no IP address at all, so it is the way in
+        # that survives every other mistake. Left on every port.
+        /tool/mac-server set allowed-interface-list=all
+        /tool/mac-server/mac-winbox set allowed-interface-list=all
+        /ip/neighbor/discovery-settings set discover-interface-list=all
+
+        # Technician port: every ethernet port not given another job is bridged
+        # and hands a laptop an address, so Winbox also works by IP at
+        # {$techAddress}. The same idea as MikroTik's own default setup.
+        /interface/bridge add name="bridge-tech" comment="Technician access: plug a laptop in here"
+        :foreach e in=[/interface/ethernet find] do={
+            :local n [/interface/ethernet get \$e name]
+            :if ((\$n != "{$wan}") && (\$n != "{$lan}") && (\$n != "{$pppoeInterface}")) do={
+                /interface/bridge/port add bridge="bridge-tech" interface=\$n
+            }
+        }
+        /ip/address add address={$techAddress} interface="bridge-tech" comment="Technician access"
+        /ip/pool add name="tech-pool" ranges={$techPool}
+        /ip/dhcp-server add name="dhcp-tech" interface="bridge-tech" address-pool="tech-pool" lease-time=1h disabled=no
+        /ip/dhcp-server/network add address={$techNetwork} gateway={$this->hostOf($techAddress)} dns-server={$this->hostOf($techAddress)} comment="Technician access"
+        :log info "platform-setup: technician access ready at {$techAddress}"
 
         # ---------------------------------------------------------------------
-        # 0b. Which side is which
+        # 0b. Which side is which, and keeping the router itself safe
         #
-        # WAN is the way out; LAN is every other interface, so a port, VLAN or
-        # tunnel added later lands on the safe side without anyone remembering
-        # to add it.
+        # WAN is the way out; LAN is every other interface — the technician
+        # port, the HotSpot, the tunnel — so anything added later lands on the
+        # safe side. Input from the internet is dropped; Winbox and SSH stay
+        # open from the LAN, which is where a technician stands.
         # ---------------------------------------------------------------------
 
         /interface/list
@@ -518,21 +559,7 @@ class RouterSetupScript
         add name=LAN include=all exclude=WAN comment="platform-base"
 
         /interface/list/member
-        {$wanMembers}
-
-        /ip/firewall/nat
-        add chain=srcnat out-interface-list=WAN action=masquerade comment="Uplink"
-
-        # ---------------------------------------------------------------------
-        # 0c. Keeping the router itself safe
-        #
-        # A wiped MikroTik has no firewall at all, and its admin is back on the
-        # factory password — blank on older boards. Without what follows, the
-        # device offers Winbox and SSH to the whole internet with no password.
-        #
-        # Input is closed to everything that does not come from the LAN. The
-        # tunnel is LAN too, which is how the platform keeps reaching it.
-        # ---------------------------------------------------------------------
+        add list=WAN interface="{$wan}" comment="platform-base"
 
         /ip/firewall/filter
         add chain=input connection-state=established,related action=accept comment="platform-base"
@@ -552,35 +579,23 @@ class RouterSetupScript
         set www-ssl disabled=yes
         set api-ssl disabled=yes
 
-        # Layer-2 access (MAC Winbox, MAC telnet) and neighbour discovery work
-        # without an IP address at all, so the firewall above never sees them.
-        # Held to the LAN on their own.
-        /tool/mac-server set allowed-interface-list=LAN
-        /tool/mac-server/mac-winbox set allowed-interface-list=LAN
-        /ip/neighbor/discovery-settings set discover-interface-list=LAN
         /tool/bandwidth-server set enabled=no
 
         # ---------------------------------------------------------------------
-        # 0d. A way in for the ISP
-        #
-        # Day to day the router is run from the dashboard. This account is for
-        # when the platform cannot reach it — a dead uplink, a site visit — and
-        # its password is on the router's setup page. The stock admin is
-        # disabled, never left on a password printed in a manual.
+        # 0c. The way out ({$uplink['mode']})
         # ---------------------------------------------------------------------
 
-        /user
-        add name="{$admin}" group=full password="{$adminPassword}" comment="ISP administrator"
-        :if ([:len [/user find name="{$admin}"]] > 0) do={
-            /user disable [find name="admin"]
-        }
+        :log info "platform-setup: bringing up the uplink on {$wan}"
+        {$wayOut}
+
+        /ip/firewall/nat
+        add chain=srcnat out-interface-list=WAN action=masquerade comment="Uplink"
 
         # ---------------------------------------------------------------------
-        # 0e. Waiting for the internet
+        # 0d. Waiting for the internet
         #
         # Everything after this downloads something or dials the platform. On a
-        # slow uplink a fixed pause runs out first, and then the tunnel and the
-        # HotSpot pages fail with nobody there to see it.
+        # slow uplink a fixed pause runs out first.
         # ---------------------------------------------------------------------
 
         :log info "platform-setup: waiting for a default route"
@@ -610,13 +625,66 @@ class RouterSetupScript
 
         # The board has no clock battery on most models. Without this every log
         # line after a power cut reads 1970.
-        :do {
-            /system/ntp/client set enabled=yes
-            /system/ntp/client/servers add address=pool.ntp.org
-        } on-error={ :log warning "platform-setup: could not configure the NTP client" }
+        {$ntp}
 
         :log info "platform-setup: uplink ready, building the rest"
         SCRIPT;
+    }
+
+    /**
+     * The technician port's network: MikroTik's own 192.168.88.0/24 where it is free, so a
+     * technician finds the router where they would look for any MikroTik — unless the HotSpot
+     * or PPPoE already uses it, in which case the next one along.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array{string, string, string} address with prefix, network, pool range
+     */
+    protected function technicianNetwork(array $options): array
+    {
+        $taken = array_filter([
+            ($options['with_hotspot'] ?? true) === true ? (string) ($options['hotspot_network'] ?? '') : '',
+            ($options['with_pppoe'] ?? false) === true ? (string) ($options['pppoe_network'] ?? '') : '',
+        ]);
+
+        foreach (['192.168.88', '192.168.77', '172.31.255'] as $prefix) {
+            $clash = false;
+
+            foreach ($taken as $network) {
+                if (str_starts_with($network, $prefix.'.')) {
+                    $clash = true;
+                }
+            }
+
+            if (! $clash) {
+                return ["{$prefix}.1/24", "{$prefix}.0/24", "{$prefix}.10-{$prefix}.254"];
+            }
+        }
+
+        return ['172.31.254.1/24', '172.31.254.0/24', '172.31.254.10-172.31.254.254'];
+    }
+
+    protected function hostOf(string $cidr): string
+    {
+        return explode('/', $cidr)[0];
+    }
+
+    /**
+     * Commands that might not exist on this board, run so that a missing menu skips them
+     * instead of killing the whole file.
+     *
+     * RouterOS reads a run-after-reset script in full before running any of it, and a command
+     * it does not recognise — `/interface/wifi` on a board without the wifi package, or
+     * `/interface/wireless` on one without the legacy one — is an error *in the file*, not in
+     * the line. One such command, anywhere, and the router comes back from its reset with no
+     * configuration at all and its radio switched off: visible to nobody, not even Winbox.
+     * Handed to `:parse` as a string, the commands are only read when they run, and a failure
+     * is a line in the log.
+     */
+    protected function deferred(string $commands, string $what): string
+    {
+        $escaped = str_replace(['\\', '"', '$', "\n"], ['\\\\', '\\"', '\\$', '\\n'], $commands);
+
+        return ':do { [[:parse "'.$escaped.'"]] } on-error={ :log warning "platform-setup: '.$what.' skipped or failed" }';
     }
 
     /**
@@ -682,60 +750,49 @@ class RouterSetupScript
      */
     protected function wirelessSection(string $wireless, string $ssid, string $bridge): string
     {
+        // One block per radio stack. A board has one or the other, and the one it lacks is a
+        // menu it does not recognise — which is why each is deferred rather than written out:
+        // see deferred(). The SSID is already held to characters that cannot close a string.
+        $legacy = $this->deferred(
+            ":if ([:len [/interface/wireless find]] > 0) do={\n"
+            ."  :if ([:len [/interface/wireless/security-profiles find name=\"platform-open\"]] = 0) do={ /interface/wireless/security-profiles add name=\"platform-open\" mode=none }\n"
+            ."  /interface/wireless set [find default-name=\"{$wireless}\"] ssid=\"{$ssid}\" mode=ap-bridge band=2ghz-b/g/n channel-width=20/40mhz-XX frequency=auto security-profile=\"platform-open\" disabled=no\n"
+            ."  :delay 3s\n"
+            ."  /interface/bridge/port remove [find interface=\"{$wireless}\"]\n"
+            ."  /interface/bridge/port add bridge=\"{$bridge}\" interface=\"{$wireless}\"\n"
+            ."  :log info \"platform-setup: wifi {$ssid} on {$wireless}\"\n"
+            .'}',
+            'the wifi (wireless package)',
+        );
+
+        $wifi = $this->deferred(
+            ":if ([:len [/interface/wifi find]] > 0) do={\n"
+            ."  /interface/wifi set [find] configuration.ssid=\"{$ssid}\" configuration.mode=ap security.authentication-types=\"\" disabled=no\n"
+            ."  :delay 3s\n"
+            ."  :foreach w in=[/interface/wifi find] do={\n"
+            ."    :local n [/interface/wifi get \$w name]\n"
+            ."    /interface/bridge/port remove [find interface=\$n]\n"
+            ."    /interface/bridge/port add bridge=\"{$bridge}\" interface=\$n\n"
+            ."  }\n"
+            ."  :log info \"platform-setup: wifi {$ssid} on the wifi package\"\n"
+            .'}',
+            'the wifi (wifi package)',
+        );
+
         return <<<SCRIPT
 
         # ---------------------------------------------------------------------
         # 3c. The wifi itself
         #
         # Open by design: the HotSpot is the thing that checks who someone is,
-        # and a wifi password would stop a customer before they could pay.
+        # and a wifi password would stop a customer before they could pay. The
+        # radio goes into the HotSpot bridge, or the SSID appears and hands out
+        # nothing.
         # ---------------------------------------------------------------------
 
         :put "Bringing up the wifi…";
-
-        :if ([:len [/interface/wireless find]] > 0) do={
-            /interface/wireless/security-profiles
-            :if ([:len [find name="platform-open"]] = 0) do={
-                add name="platform-open" mode=none
-            }
-
-            /interface/wireless
-            set [find default-name="{$wireless}"] \\
-                ssid="{$ssid}" \\
-                mode=ap-bridge \\
-                band=2ghz-b/g/n \\
-                channel-width=20/40mhz-XX \\
-                frequency=auto \\
-                security-profile="platform-open" \\
-                disabled=no
-        } else={
-            :if ([:len [/interface/wifi find]] > 0) do={
-                /interface/wifi
-                set [find] \\
-                    configuration.ssid="{$ssid}" \\
-                    configuration.mode=ap \\
-                    security.authentication-types="" \\
-                    disabled=no
-            } else={
-                :put "No wireless interface on this board — customers will need a cable.";
-            }
-        }
-
-        :delay 3s;
-
-        # The radio has to be in the same bridge as the HotSpot, or the SSID
-        # appears and hands out nothing.
-        :if ([:len [/interface/wireless find]] > 0) do={
-            /interface/bridge/port
-            remove [find interface="{$wireless}"]
-            add bridge="{$bridge}" interface="{$wireless}"
-        } else={
-            :foreach w in=[/interface/wifi find] do={
-                :local n [/interface/wifi get \$w name];
-                /interface/bridge/port remove [find interface=\$n]
-                /interface/bridge/port add bridge="{$bridge}" interface=\$n
-            }
-        }
+        {$legacy}
+        {$wifi}
         SCRIPT;
     }
 

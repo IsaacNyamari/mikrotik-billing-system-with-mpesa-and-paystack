@@ -200,19 +200,58 @@ class WipeAndRebuildTest extends TestCase
     }
 
     #[Test]
-    public function the_wipe_choice_is_remembered_and_never_the_default(): void
+    public function wiping_is_the_default_and_keeping_the_configuration_has_to_be_chosen(): void
     {
         $fresh = Router::factory()->create(['slug' => 'fresh']);
 
-        // Erasing a router is never something that happens because nobody chose otherwise.
-        $this->assertStringNotContainsString(
-            '/system/reset-configuration',
-            app(RouterSetupScript::class)->for($fresh),
-        );
+        // Every router is built from nothing unless someone asks to keep what is there.
+        $this->assertStringContainsString('/system/reset-configuration', app(RouterSetupScript::class)->for($fresh));
 
-        $this->wipeScript();
+        $kept = Router::factory()->create(['slug' => 'kept']);
+        $this->assertStringNotContainsString('/system/reset-configuration', app(RouterSetupScript::class)->for($kept, ['wipe' => false]));
+        $this->assertFalse($kept->fresh()->setupOptions()['wipe']);
+    }
 
-        $this->assertTrue($this->router->fresh()->setupOptions()['wipe']);
+    #[Test]
+    public function the_way_in_is_built_before_anything_that_can_fail(): void
+    {
+        $file = $this->configuration();
+
+        $access = strpos($file, '/tool/mac-server/mac-winbox set allowed-interface-list=all');
+        $this->assertNotFalse($access);
+        $this->assertStringContainsString('/interface/bridge add name="bridge-tech"', $file);
+        $this->assertStringContainsString('address=192.168.88.1/24 interface="bridge-tech"', $file);
+
+        // Before the uplink, the tunnel and the HotSpot, any of which may fail on some board.
+        $this->assertLessThan(strpos($file, 'the uplink on ether1'), $access);
+        $this->assertLessThan(strpos($file, '/interface/wireguard'), $access);
+        $this->assertLessThan(strpos($file, '/ip/hotspot'), $access);
+
+        // A missing port is logged, never a reason to stop.
+        $this->assertStringNotContainsString(':error', $file);
+    }
+
+    #[Test]
+    public function radio_commands_cannot_stop_the_file(): void
+    {
+        $file = $this->configuration();
+
+        // A board without one radio package does not recognise that package's menu, and an
+        // unrecognised command anywhere in a run-after-reset file stops all of it.
+        foreach (explode("\n", $file) as $line) {
+            if (str_contains($line, '/interface/wifi') || str_contains($line, '/interface/wireless')) {
+                $this->assertStringContainsString('[[:parse', $line);
+            }
+        }
+    }
+
+    #[Test]
+    public function the_paste_resets_without_stopping_to_ask(): void
+    {
+        $script = $this->wipeScript();
+
+        $this->assertStringContainsString('/system/script run platform-reset', $script);
+        $this->assertStringNotContainsString("\n/system/reset-configuration", $script);
     }
 
     #[Test]
@@ -239,10 +278,11 @@ class WipeAndRebuildTest extends TestCase
         $this->assertStringContainsString('connection-nat-state=!dstnat in-interface-list=WAN action=drop', $file);
         $this->assertStringContainsString('out-interface-list=WAN action=masquerade', $file);
 
-        // Layer-2 access never meets the firewall, so it is held to the LAN on its own.
-        $this->assertStringContainsString('/tool/mac-server set allowed-interface-list=LAN', $file);
-        $this->assertStringContainsString('/tool/mac-server/mac-winbox set allowed-interface-list=LAN', $file);
-        $this->assertStringContainsString('discover-interface-list=LAN', $file);
+        // Layer-2 access is deliberately left on every port: it is the way in that survives
+        // every other mistake, and the strong ISP administrator password is what guards it.
+        $this->assertStringContainsString('/tool/mac-server set allowed-interface-list=all', $file);
+        $this->assertStringContainsString('/tool/mac-server/mac-winbox set allowed-interface-list=all', $file);
+        $this->assertStringContainsString('discover-interface-list=all', $file);
         $this->assertStringContainsString('set www-ssl disabled=yes', $file);
 
         // The final drop comes after the accepts, or it would drop those too.
@@ -315,8 +355,9 @@ class WipeAndRebuildTest extends TestCase
             'wan_dns' => '9.9.9.9, 149.112.112.112',
         ]);
 
-        $this->assertStringContainsString('add address=196.201.1.10/29 interface="ether1" comment="Uplink"', $file);
-        $this->assertStringContainsString('add dst-address=0.0.0.0/0 gateway=196.201.1.9 comment="Uplink"', $file);
+        // Inside a deferred block, so the quotes arrive escaped once.
+        $this->assertStringContainsString('/ip/address add address=196.201.1.10/29 interface=\\"ether1\\" comment=\\"Uplink\\"', $file);
+        $this->assertStringContainsString('/ip/route add dst-address=0.0.0.0/0 gateway=196.201.1.9 comment=\\"Uplink\\"', $file);
         $this->assertStringContainsString('set servers=9.9.9.9,149.112.112.112', $file);
         $this->assertStringNotContainsString('/ip/dhcp-client', $file);
     }
@@ -345,9 +386,11 @@ class WipeAndRebuildTest extends TestCase
 
         // The three characters that mean something inside a RouterOS string are escaped, so
         // the password is the password and not the end of the command.
-        $this->assertStringContainsString('user="kwamwaura@fibre" password="pa\\"ss\\$word\\\\x"', $file);
-        $this->assertStringContainsString('add name="pppoe-uplink" interface="ether1"', $file);
-        $this->assertStringContainsString('add list=WAN interface="pppoe-uplink"', $file);
+        // Escaped twice: once for the RouterOS string, once more for the deferred block it
+        // sits inside, which RouterOS unescapes before parsing.
+        $this->assertStringContainsString('user=\\"kwamwaura@fibre\\" password=\\"pa\\\\\\"ss\\\\\\$word\\\\\\\\x\\"', $file);
+        $this->assertStringContainsString('add name=\\"pppoe-uplink\\" interface=\\"ether1\\"', $file);
+        $this->assertStringContainsString('add list=WAN interface=\\"pppoe-uplink\\"', $file);
 
         $router = $this->router->fresh();
         $this->assertSame('pa"ss$word\\x', $router->wan_pppoe_password);
