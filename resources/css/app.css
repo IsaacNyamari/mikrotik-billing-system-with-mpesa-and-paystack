@@ -64,3 +64,15 @@ select:focus[data-flux-control] {
 /* \[:where(&)\]:size-4 {
     @apply size-4;
 } */
+
+/*
+ * Breathing room in every table. Flux pads cells but strips the padding from the first and
+ * last column, so a table sitting edge to edge in a card — the router console, the outages
+ * list — ran its text into the card's border. Written outside any layer so it outranks Flux's
+ * first:ps-0 / last:pe-0 utilities without !important.
+ */
+[data-flux-table] [data-flux-column],
+[data-flux-table] [data-flux-cell] {
+    padding-block: 0.75rem;
+    padding-inline: 1rem;
+}
