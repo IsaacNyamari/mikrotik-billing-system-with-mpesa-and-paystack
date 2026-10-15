@@ -4,6 +4,7 @@ namespace App\Services\Mpesa;
 
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
+use App\Services\Billing\ServiceAccountRenewal;
 use App\Services\RouterOs\HotspotUserProvisioner;
 use App\Support\Audit\AuditLogger;
 use Illuminate\Support\Facades\Cache;
@@ -189,6 +190,11 @@ class CallbackProcessor
      */
     public function grantAccess(Payment $payment): Payment
     {
+        // A PPPoE renewal buys time on an existing line rather than a new login.
+        if ($payment->service_account_id !== null) {
+            return app(ServiceAccountRenewal::class)->renew($payment);
+        }
+
         if ($payment->hotspot_user_id !== null || $payment->plan_id === null || $payment->router_id === null) {
             return $payment;
         }

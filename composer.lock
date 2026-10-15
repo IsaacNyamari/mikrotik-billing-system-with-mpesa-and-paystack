@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e7d65976b7b8f806ab698c87bf1896b5",
+    "content-hash": "4ae2a83a46f321fe27d119d4e692d543",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -1288,6 +1288,67 @@
                 }
             ],
             "time": "2026-07-17T13:53:03+00:00"
+        },
+        {
+            "name": "itsmurumba/laravel-hostpinnacle",
+            "version": "v0.0.6",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/ItsMurumba/laravel-hostpinnacle.git",
+                "reference": "df2ff2c90ee85bef5ef4ec447d0dc7adf8167d42"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/ItsMurumba/laravel-hostpinnacle/zipball/df2ff2c90ee85bef5ef4ec447d0dc7adf8167d42",
+                "reference": "df2ff2c90ee85bef5ef4ec447d0dc7adf8167d42",
+                "shasum": ""
+            },
+            "require": {
+                "illuminate/support": "^5.0|^6.0|^7.0|^8.0|^9.0|^10.0|^11.0|^12.0|^13.0",
+                "php": "^7.1|^8.0|^8.1|^8.2|^8.3"
+            },
+            "require-dev": {
+                "orchestra/testbench": "^4.0|^5.0|^6.0|^7.0|^8.0|^9.0|^10.0|^11.0",
+                "pestphp/pest": "^4.0",
+                "pestphp/pest-plugin-laravel": "^4.0"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "aliases": {
+                        "Hostpinnacle": "Itsmurumba\\Hostpinnacle\\Facades\\Hostpinnacle"
+                    },
+                    "providers": [
+                        "Itsmurumba\\Hostpinnacle\\HostpinnacleServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Itsmurumba\\Hostpinnacle\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "ItsMurumba",
+                    "email": "kevmurumba@gmail.com"
+                }
+            ],
+            "description": "Laravel Package for Hostpinnacle SMS API",
+            "keywords": [
+                "hostpinnacle",
+                "itsmurumba",
+                "laravel"
+            ],
+            "support": {
+                "issues": "https://github.com/ItsMurumba/laravel-hostpinnacle/issues",
+                "source": "https://github.com/ItsMurumba/laravel-hostpinnacle/tree/v0.0.6"
+            },
+            "time": "2026-09-14T19:33:35+00:00"
         },
         {
             "name": "laravel/chisel",

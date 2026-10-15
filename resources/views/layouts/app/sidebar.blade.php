@@ -80,7 +80,7 @@
                     </flux:sidebar.group>
                 @endcan
 
-                @canany([Permissions::REPORTS_VIEW_REVENUE, Permissions::SETTINGS_MANAGE_PAYMENT_CREDENTIALS])
+                @canany([Permissions::REPORTS_VIEW_REVENUE, Permissions::SETTINGS_MANAGE_PAYMENT_CREDENTIALS, Permissions::SETTINGS_UPDATE])
                     <flux:sidebar.group class="grid">
                         <div class="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 in-data-flux-sidebar-collapsed-desktop:hidden dark:text-zinc-500">{{ __('Billing') }}</div>
                         @can(Permissions::REPORTS_VIEW_REVENUE)
@@ -88,6 +88,9 @@
                         @endcan
                         @can(Permissions::SETTINGS_MANAGE_PAYMENT_CREDENTIALS)
                             <flux:sidebar.item icon="credit-card" :href="route('settings.mpesa')" :current="request()->routeIs('settings.mpesa')" wire:navigate>{{ __('M-PESA & Paystack') }}</flux:sidebar.item>
+                        @endcan
+                        @can(Permissions::SETTINGS_UPDATE)
+                            <flux:sidebar.item icon="chat-bubble-left-ellipsis" :href="route('settings.sms')" :current="request()->routeIs('settings.sms')" wire:navigate>{{ __('SMS') }}</flux:sidebar.item>
                         @endcan
                     </flux:sidebar.group>
                 @endcanany

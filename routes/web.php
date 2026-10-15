@@ -21,6 +21,10 @@ Route::livewire('pricing', 'pages::frontend.services')->name('pricing');
 // The portal key identifies which router — and so which ISP — they landed from.
 Route::livewire('p/{portalKey}', 'pages::portal.index')->name('portal');
 
+// Where a PPPoE subscriber pays from the link in their reminder text. Public: the token says
+// which line, and so which ISP.
+Route::livewire('pay/{token}', 'pages::pay.show')->name('pay');
+
 // Fetched by the router itself during hotspot:install-portal, then served from its own
 // storage to customers.
 Route::get('p/{portalKey}/mikrotik/{page}', HotspotPageController::class)
@@ -118,6 +122,7 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
     Route::livewire('reports/earnings', 'pages::reports.earnings')->name('reports.earnings');
     Route::livewire('settings/mpesa', 'pages::settings.mpesa')->name('settings.mpesa');
     Route::livewire('settings/portal', 'pages::settings.portal')->name('settings.portal');
+    Route::livewire('settings/sms', 'pages::settings.sms')->name('settings.sms');
 });
 
 require __DIR__.'/settings.php';

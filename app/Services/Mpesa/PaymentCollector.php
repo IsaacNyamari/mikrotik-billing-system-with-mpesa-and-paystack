@@ -6,6 +6,7 @@ use App\Enums\PaymentStatus;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Router;
+use App\Models\ServiceAccount;
 use App\Services\Payments\PaymentGatewayManager;
 use App\Support\PhoneNumber;
 use Illuminate\Support\Facades\Log;
@@ -21,6 +22,26 @@ use RuntimeException;
 class PaymentCollector
 {
     public function __construct(protected PaymentGatewayManager $gateways) {}
+
+    /**
+     * Prompt a PPPoE subscriber's phone for their line's next period.
+     *
+     * The same path as a HotSpot sale, so the money lands in the same place and is settled by
+     * the same callback and reconciliation; only what it buys differs.
+     */
+    public function collectRenewal(ServiceAccount $account, string $phone): Payment
+    {
+        $account->loadMissing(['plan', 'router']);
+
+        if ($account->plan === null || $account->router === null) {
+            throw new RuntimeException('This line has no package or router to bill.');
+        }
+
+        return $this->collect($account->plan, $account->router, $phone, [
+            'service_account_id' => $account->id,
+            'customer_id' => $account->customer_id,
+        ]);
+    }
 
     /**
      * @param  array<string, mixed>  $attributes

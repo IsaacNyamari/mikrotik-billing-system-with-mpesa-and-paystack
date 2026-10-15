@@ -3,6 +3,7 @@
 namespace App\Services\Payments;
 
 use App\Models\MpesaConfiguration;
+use App\Services\Platform\PlatformTill;
 
 /**
  * Works out which Daraja app signs an ISP's collections.
@@ -31,13 +32,28 @@ class DarajaCredentials
      */
     public function platformCanSign(): bool
     {
+        return $this->platformApp() !== null;
+    }
+
+    /**
+     * The platform's own Daraja app: what the platform owner saved under Platform admin →
+     * Platform payments, or the environment when nothing has been saved there.
+     */
+    protected function platformApp(): ?MpesaConfiguration
+    {
+        $app = app(PlatformTill::class)->configuration();
+
+        if ($app === null) {
+            return null;
+        }
+
         foreach (['consumer_key', 'consumer_secret', 'short_code', 'passkey'] as $key) {
-            if (blank(config("platform.mpesa.{$key}"))) {
-                return false;
+            if (blank($app->{$key})) {
+                return null;
             }
         }
 
-        return true;
+        return $app;
     }
 
     /**
@@ -57,20 +73,22 @@ class DarajaCredentials
             return $tenantConfiguration;
         }
 
-        if (! $this->platformCanSign()) {
+        $platform = $this->platformApp();
+
+        if ($platform === null) {
             return null;
         }
 
         $effective = new MpesaConfiguration([
-            'environment' => (string) config('platform.mpesa.environment'),
+            'environment' => (string) $platform->environment,
             // Signed as the platform's shortcode…
-            'short_code' => (string) config('platform.mpesa.short_code'),
+            'short_code' => (string) $platform->short_code,
             // …but paid to the ISP's till. This one line is the whole arrangement.
             'party_b' => $tenantConfiguration->collectionNumber(),
             'transaction_type' => $tenantConfiguration->transaction_type,
-            'consumer_key' => (string) config('platform.mpesa.consumer_key'),
-            'consumer_secret' => (string) config('platform.mpesa.consumer_secret'),
-            'passkey' => (string) config('platform.mpesa.passkey'),
+            'consumer_key' => (string) $platform->consumer_key,
+            'consumer_secret' => (string) $platform->consumer_secret,
+            'passkey' => (string) $platform->passkey,
             'account_reference' => $tenantConfiguration->account_reference,
         ]);
 

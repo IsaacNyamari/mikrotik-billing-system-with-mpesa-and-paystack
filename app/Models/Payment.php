@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int|null $router_id
  * @property int|null $customer_id
  * @property int|null $hotspot_user_id
+ * @property int|null $service_account_id
  * @property string $provider
  * @property PaymentStatus $status
  * @property string $phone
@@ -39,12 +40,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $client_ip
  * @property CarbonImmutable|null $paid_at
  * @property CarbonImmutable|null $failed_at
+ * @property CarbonImmutable|null $applied_at
  */
 #[Fillable([
     'plan_id',
     'router_id',
     'customer_id',
     'hotspot_user_id',
+    'service_account_id',
     'provider',
     'phone',
     'amount',
@@ -83,6 +86,7 @@ class Payment extends Model
             'callback_payload' => 'array',
             'paid_at' => 'datetime',
             'failed_at' => 'datetime',
+            'applied_at' => 'datetime',
         ];
     }
 
@@ -108,6 +112,16 @@ class Payment extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * The PPPoE line this payment renews, when it is a renewal rather than a HotSpot sale.
+     *
+     * @return BelongsTo<ServiceAccount, $this>
+     */
+    public function serviceAccount(): BelongsTo
+    {
+        return $this->belongsTo(ServiceAccount::class);
     }
 
     /**

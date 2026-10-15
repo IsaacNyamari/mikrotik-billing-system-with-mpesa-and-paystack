@@ -54,6 +54,14 @@ Schedule::command('billing:run')
     ->withoutOverlapping(60)
     ->runInBackground();
 
+// PPPoE subscribers: a text a few days before and on the due date, the line cut when it passes,
+// and reconnected the moment a renewal is paid. Every five minutes so a payment that landed
+// while a router was unreachable is applied soon after it comes back.
+Schedule::command('pppoe:billing')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(15)
+    ->runInBackground();
+
 // A safety net under the automatic sync that runs when a router is given keys: a server
 // restored from backup, or a peer added while the queue was down, is put right within ten
 // minutes without anybody noticing it was missing.

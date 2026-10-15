@@ -13,7 +13,9 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Str;
 
 /**
  * One network service belonging to a customer: a PPPoE line, a HotSpot login, a static-IP link.
@@ -41,6 +43,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string|null $provision_error
  * @property CarbonImmutable|null $suspended_at
  * @property CarbonImmutable|null $terminated_at
+ * @property CarbonImmutable|null $expires_at
+ * @property string|null $pay_token
+ * @property CarbonImmutable|null $reminded_before_for
+ * @property CarbonImmutable|null $reminded_due_for
+ * @property bool $suspended_for_nonpayment
  * @property string|null $notes
  */
 #[Fillable([
@@ -86,7 +93,66 @@ class ServiceAccount extends Model
             'provisioned_at' => 'datetime',
             'suspended_at' => 'datetime',
             'terminated_at' => 'datetime',
+            'expires_at' => 'datetime',
+            'reminded_before_for' => 'date',
+            'reminded_due_for' => 'date',
+            'suspended_for_nonpayment' => 'boolean',
         ];
+    }
+
+    /**
+     * Renewals paid against this line.
+     *
+     * @return HasMany<Payment, $this>
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * Texts sent about this line.
+     *
+     * @return HasMany<SmsMessage, $this>
+     */
+    public function smsMessages(): HasMany
+    {
+        return $this->hasMany(SmsMessage::class);
+    }
+
+    /**
+     * Whether this line is billed by the system: a PPPoE line with a package and a router.
+     */
+    public function isBilled(): bool
+    {
+        return $this->type === ServiceType::Pppoe && $this->plan_id !== null && $this->router_id !== null;
+    }
+
+    /**
+     * The link a subscriber is texted, to pay from their phone without an account of their own.
+     *
+     * The token is made on first use and kept, so a link sent last month still works.
+     */
+    public function payUrl(): string
+    {
+        if ($this->pay_token === null) {
+            $this->pay_token = Str::lower(Str::random(24));
+            $this->saveQuietly();
+        }
+
+        return route('pay', ['token' => $this->pay_token]);
+    }
+
+    /**
+     * Whole days until the paid period ends: negative once it has passed, null when never set.
+     */
+    public function daysLeft(): ?int
+    {
+        if ($this->expires_at === null) {
+            return null;
+        }
+
+        return (int) now()->startOfDay()->diffInDays($this->expires_at->startOfDay(), false);
     }
 
     /**

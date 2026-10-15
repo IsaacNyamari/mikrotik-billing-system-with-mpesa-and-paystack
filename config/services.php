@@ -28,6 +28,16 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // The platform's own HostPinnacle account: used for an ISP that has not entered one of its
+    // own under Settings → SMS.
+    'hostpinnacle' => [
+        'api_key' => env('HOSTPINNACLE_API_KEY'),
+        'sender_id' => env('HOSTPINNACLE_SENDER_ID'),
+        'username' => env('HOSTPINNACLE_LOGIN_USERNAME'),
+        'password' => env('HOSTPINNACLE_LOGIN_PASSWORD'),
+        'base_url' => env('HOSTPINNACLE_BASE_URL', 'https://smsportal.hostpinnacle.co.ke/SMSApi'),
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
