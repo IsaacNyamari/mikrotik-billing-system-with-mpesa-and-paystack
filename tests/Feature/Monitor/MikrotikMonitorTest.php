@@ -63,11 +63,26 @@ class MikrotikMonitorTest extends TestCase
     }
 
     #[Test]
-    public function the_monitor_shows_what_the_device_is_doing(): void
+    public function the_page_draws_without_waiting_for_the_router(): void
     {
         $this->actingAs($this->engineer)
             ->get(route('monitor.index'))
             ->assertOk()
+            ->assertSee('Reading Nairobi 01')
+            ->assertSee('wire:init="refresh"', escape: false);
+
+        // Not one command reached the device while the page was being built: a slow tunnel
+        // or a dead router must never hold up the page itself.
+        $this->assertSame([], $this->routers->for($this->router)->log);
+    }
+
+    #[Test]
+    public function the_monitor_shows_what_the_device_is_doing(): void
+    {
+        $this->actingAs($this->engineer);
+
+        Livewire::test('pages::monitor.index')
+            ->call('refresh')
             ->assertSee('Nairobi 01')
             // The live hotspot session, straight off the device.
             ->assertSee('GDGDAHXS')
@@ -75,13 +90,51 @@ class MikrotikMonitorTest extends TestCase
     }
 
     #[Test]
+    public function the_first_reading_is_a_real_rate_rather_than_a_zero(): void
+    {
+        $this->routers->for($this->router)->seed('/interface/monitor-traffic', [[
+            'name' => 'bridge-hotspot', 'rx-bits-per-second' => '8000000', 'tx-bits-per-second' => '2000000',
+        ]]);
+
+        $this->actingAs($this->engineer);
+
+        $component = Livewire::test('pages::monitor.index')->call('refresh');
+
+        $history = $component->get('history');
+
+        $this->assertCount(1, $history);
+        $this->assertSame(8_000_000.0, $history[0]['rx']);
+        $this->assertSame(2_000_000.0, $history[0]['tx']);
+        $component->assertSee('8 Mbps');
+
+        $asked = collect($this->routers->for($this->router)->log)->firstWhere('path', '/interface/monitor-traffic');
+        $this->assertSame(['interface' => 'bridge-hotspot', 'once' => ''], $asked['payload']);
+    }
+
+    #[Test]
+    public function the_device_is_asked_for_its_rate_only_until_counters_take_over(): void
+    {
+        $this->actingAs($this->engineer);
+
+        $component = Livewire::test('pages::monitor.index')->call('refresh');
+        $this->routers->for($this->router)->log = [];
+
+        $component->call('refresh');
+
+        // monitor-traffic samples for a second on the device. Once there is a counter reading
+        // to compare against, that second is wasted on every poll.
+        $this->assertNull(collect($this->routers->for($this->router)->log)->firstWhere('path', '/interface/monitor-traffic'));
+    }
+
+    #[Test]
     public function traffic_is_worked_out_from_two_counter_readings(): void
     {
         $this->actingAs($this->engineer);
 
-        $component = Livewire::test('pages::monitor.index');
+        $component = Livewire::test('pages::monitor.index')->call('refresh');
 
-        // The first reading establishes a baseline and cannot produce a rate on its own.
+        // The first reading establishes a baseline. This device does not answer
+        // monitor-traffic, so it cannot produce a rate on its own.
         $this->assertCount(0, $component->get('history'));
 
         // A megabyte more received since the last poll.
@@ -117,9 +170,10 @@ class MikrotikMonitorTest extends TestCase
     {
         $this->routers->makeUnreachable($this->router, 'Connection timed out');
 
-        $this->actingAs($this->engineer)
-            ->get(route('monitor.index'))
-            ->assertOk()
+        $this->actingAs($this->engineer);
+
+        Livewire::test('pages::monitor.index')
+            ->call('refresh')
             ->assertSee('Cannot reach')
             ->assertSee('timed out');
     }
@@ -131,9 +185,10 @@ class MikrotikMonitorTest extends TestCase
         // is wrong, so it has to survive the parts it cannot read.
         $this->routers->for($this->router)->trap('/ppp/active', 'no such command prefix');
 
-        $this->actingAs($this->engineer)
-            ->get(route('monitor.index'))
-            ->assertOk()
+        $this->actingAs($this->engineer);
+
+        Livewire::test('pages::monitor.index')
+            ->call('refresh')
             ->assertSee('GDGDAHXS');
     }
 

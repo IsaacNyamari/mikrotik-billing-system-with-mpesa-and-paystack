@@ -53,7 +53,9 @@ new #[Title('MikroTik Monitor')] class extends Component {
             ? $this->routerSlug
             : (string) Router::query()->orderBy('name')->value('slug');
 
-        $this->refresh();
+        // Deliberately not read here. Reading the router before the page exists means the
+        // operator stares at a blank tab for as long as the tunnel takes, which is six seconds
+        // and more when the device is down. The page draws at once and wire:init reads it.
     }
 
     protected function routerExists(string $slug): bool
@@ -106,7 +108,10 @@ new #[Title('MikroTik Monitor')] class extends Component {
         }
 
         $monitor ??= app(RouterMonitor::class);
-        $snapshot = $monitor->snapshot($router);
+
+        // With nothing to compare against yet, ask the device for its rate outright, so the
+        // first figures on screen are readings rather than zeros.
+        $snapshot = $monitor->snapshot($router, $this->previous === null ? $this->interface : null);
 
         $this->snapshot = $snapshot;
 
@@ -130,11 +135,7 @@ new #[Title('MikroTik Monitor')] class extends Component {
             // Default to whatever is actually carrying traffic, which is the one an operator
             // would have picked anyway. A device whose interfaces cannot be read leaves this
             // empty rather than throwing — the rest of the monitor is still worth showing.
-            $busiest = $interfaces
-                ->sortByDesc(fn (array $row): int => (int) ($row['rx-byte'] ?? 0))
-                ->first();
-
-            $this->interface = (string) ($busiest['name'] ?? '');
+            $this->interface = $snapshot['rate']['interface'] ?? RouterMonitor::busiest($snapshot['interfaces']);
         }
 
         $current = $this->interface === ''
@@ -148,6 +149,12 @@ new #[Title('MikroTik Monitor')] class extends Component {
         $rxBytes = (int) ($current['rx-byte'] ?? 0);
         $txBytes = (int) ($current['tx-byte'] ?? 0);
         $now = (float) $snapshot['sampledAt'];
+
+        $rate = $snapshot['rate'] ?? null;
+
+        if ($this->previous === null && $rate !== null && $rate['interface'] === $this->interface) {
+            $this->history[] = ['t' => (int) $now, 'rx' => $rate['rx'], 'tx' => $rate['tx']];
+        }
 
         if ($this->previous !== null) {
             $seconds = $now - $this->previous['at'];
@@ -213,7 +220,7 @@ new #[Title('MikroTik Monitor')] class extends Component {
 }; ?>
 
 <section class="w-full">
-    <div class="flex flex-col gap-6 p-6" @if (! $paused) wire:poll.5s="refresh" @endif>
+    <div class="flex flex-col gap-6 p-6" wire:init="refresh" @if (! $paused) wire:poll.5s="refresh" @endif>
         <div class="flex flex-wrap items-end justify-between gap-4">
             <div>
                 <flux:heading size="xl">{{ __('MikroTik Monitor') }}</flux:heading>
@@ -256,6 +263,20 @@ new #[Title('MikroTik Monitor')] class extends Component {
                         {{ __('Add router') }}
                     </flux:button>
                 @endcan
+            </flux:card>
+        @elseif ($snapshot === null)
+            {{-- The page is up before the router has answered. Say what is happening rather
+                 than show an empty screen or a row of zeros that look like readings. --}}
+            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                @foreach ([__('Download'), __('Upload'), __('CPU'), __('Memory')] as $label)
+                    <flux:card>
+                        <flux:text size="sm" class="opacity-60">{{ $label }}</flux:text>
+                        <div class="mt-2 h-7 w-24 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700"></div>
+                    </flux:card>
+                @endforeach
+            </div>
+            <flux:card class="flex h-56 items-center justify-center">
+                <flux:text>{{ __('Reading :name…', ['name' => $this->router->name]) }}</flux:text>
             </flux:card>
         @elseif ($snapshot && ! $snapshot['online'])
             <flux:callout variant="danger" icon="exclamation-triangle">
