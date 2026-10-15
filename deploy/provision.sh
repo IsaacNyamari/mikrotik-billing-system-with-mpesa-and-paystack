@@ -87,6 +87,16 @@ if [ ${#skipped[@]} -gt 0 ]; then
     echo "  not packaged on this release: ${skipped[*]}"
 fi
 
+# A database server only when the box has none. A shared box usually already runs MySQL or
+# MariaDB for its other sites, and installing a second server beside it would fight it for
+# port 3306; a fresh one has nothing, and the database step below would fail with
+# "can't connect" — a message that sends people looking at passwords rather than packages.
+if ! systemctl list-unit-files 2>/dev/null | grep -qE '^(mysql|mariadb|mysqld)\.service'; then
+    apt-get install -y -qq mysql-server >/dev/null
+    systemctl enable --now mysql >/dev/null 2>&1 || true
+    echo "  mysql-server installed"
+fi
+
 if ! command -v composer >/dev/null 2>&1; then
     curl -fsSL https://getcomposer.org/installer -o /tmp/composer-setup.php
     php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer --quiet
