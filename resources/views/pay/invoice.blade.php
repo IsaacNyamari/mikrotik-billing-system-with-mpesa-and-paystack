@@ -34,7 +34,8 @@
                     @if ($invoice->status->isOutstanding())
                         <a href="{{ route('pay', ['token' => $account->pay_token]) }}" class="fe-btn-primary !px-4 !py-2.5">{{ __('Pay now') }}</a>
                     @endif
-                    <button type="button" onclick="window.print()" class="fe-btn-outline !px-4 !py-2.5">{{ __('Print or save as PDF') }}</button>
+                    <a href="{{ route('pay.invoice.pdf', ['token' => $account->pay_token, 'number' => $invoice->number]) }}" class="fe-btn-outline !px-4 !py-2.5">{{ __('Download PDF') }}</a>
+                    <button type="button" onclick="window.print()" class="fe-btn-outline !px-4 !py-2.5">{{ __('Print') }}</button>
                 </div>
             </div>
 

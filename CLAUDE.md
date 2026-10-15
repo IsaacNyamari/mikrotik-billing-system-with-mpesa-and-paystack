@@ -853,6 +853,17 @@ the same row). Numbered `INV-000001` per ISP by `SequenceGenerator`. Separate fr
   (`CustomerInvoiceController`, printable, "Print or save as PDF"). The number must belong to
   the line the token opens. The pay page lists the last twelve, reminders name the invoice,
   and the payment text links the receipt.
+- **PDF and email** (`barryvdh/laravel-dompdf`): `InvoicePdf` renders
+  `resources/views/pdf/customer-invoice.blade.php`, plain CSS 2.1 with tables (dompdf has no
+  flex, grid or Tailwind) and DejaVu Sans, with font subsetting on (860 KB to about 23 KB).
+  Downloaded at `pay/{token}/invoices/{number}/pdf`. `SendCustomerInvoice` emails it as an
+  attachment when an invoice is raised, when one is paid (the receipt), and from the Email
+  button on the customer page. Only to customers with an email address, and stamped
+  `emailed_at`. It is a job carrying ids that binds the ISP and builds the mailable inside,
+  rather than a queued mailable, because a queued mailable re-reads its models in the worker
+  with no tenant bound, which strict scoping refuses. Dispatched `afterCommit()`, since
+  invoices are raised and settled inside transactions. Sent from `MAIL_FROM_ADDRESS` under
+  the ISP's name, with replies to the ISP's `contact_email`.
 
 **SMS is HostPinnacle** (`itsmurumba/laravel-hostpinnacle`, SaaS mode left off) behind
 `SmsSender`. The ISP's own account (`sms_settings`, password and API key encrypted, sender ID

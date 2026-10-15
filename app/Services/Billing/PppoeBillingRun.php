@@ -6,6 +6,7 @@ use App\Actions\ServiceAccounts\ChangeServiceAccountStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\ServiceAccountStatus;
 use App\Enums\ServiceType;
+use App\Jobs\SendCustomerInvoice;
 use App\Models\Payment;
 use App\Models\ServiceAccount;
 use App\Models\SmsMessage;
@@ -61,8 +62,11 @@ class PppoeBillingRun
             ->orderBy('id')
             ->each(function (ServiceAccount $account) use ($now, $daysBefore, $daytime, &$tally): void {
                 // The bill first, so every reminder below has an invoice to point at.
-                if ($this->invoices->raiseFor($account)?->wasRecentlyCreated) {
+                $invoice = $this->invoices->raiseFor($account);
+
+                if ($invoice?->wasRecentlyCreated) {
                     $tally['invoiced']++;
+                    SendCustomerInvoice::for($invoice);
                 }
 
                 if ($account->status === ServiceAccountStatus::Suspended) {

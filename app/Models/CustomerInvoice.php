@@ -33,6 +33,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property CarbonImmutable|null $paid_at
  * @property string|null $receipt
  * @property string|null $void_reason
+ * @property CarbonImmutable|null $emailed_at
  * @property CarbonImmutable|null $created_at
  */
 #[Fillable(['customer_id', 'service_account_id', 'plan_id', 'description', 'amount', 'currency', 'due_at', 'period_start', 'period_end'])]
@@ -60,6 +61,7 @@ class CustomerInvoice extends Model
             'period_start' => 'datetime',
             'period_end' => 'datetime',
             'paid_at' => 'datetime',
+            'emailed_at' => 'datetime',
         ];
     }
 
@@ -103,6 +105,16 @@ class CustomerInvoice extends Model
         $this->loadMissing('serviceAccount');
 
         return route('pay.invoice', ['token' => $this->serviceAccount->payToken(), 'number' => $this->number]);
+    }
+
+    /**
+     * The same document as a PDF, for download.
+     */
+    public function pdfUrl(): string
+    {
+        $this->loadMissing('serviceAccount');
+
+        return route('pay.invoice.pdf', ['token' => $this->serviceAccount->payToken(), 'number' => $this->number]);
     }
 
     /**

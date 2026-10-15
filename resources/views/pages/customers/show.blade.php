@@ -244,6 +244,26 @@ new #[Title('Customer')] class extends Component {
             ->get();
     }
 
+    /**
+     * Send an invoice or receipt to the customer's email, with the PDF attached.
+     */
+    public function emailInvoice(int $invoiceId): void
+    {
+        Gate::authorize('update', $this->customer);
+
+        $invoice = CustomerInvoice::query()->where('customer_id', $this->customer->id)->findOrFail($invoiceId);
+
+        if (blank($this->customer->email)) {
+            Flux::toast(variant: 'warning', text: __('This customer has no email address. Add one under Edit.'));
+
+            return;
+        }
+
+        \App\Jobs\SendCustomerInvoice::dispatch($invoice->tenant_id, $invoice->id);
+
+        Flux::toast(variant: 'success', text: __(':number is on its way to :email.', ['number' => $invoice->number, 'email' => $this->customer->email]));
+    }
+
     public function voidInvoice(int $invoiceId, CustomerInvoices $invoices): void
     {
         Gate::authorize(Permissions::INVOICES_VOID);
@@ -561,10 +581,17 @@ new #[Title('Customer')] class extends Component {
                             @if ($invoice->receipt)
                                 <flux:text size="sm" class="font-mono opacity-70">{{ $invoice->receipt }}</flux:text>
                             @endif
+                            @if ($invoice->emailed_at)
+                                <flux:text size="sm" class="opacity-60">{{ __('Emailed :when', ['when' => $invoice->emailed_at->diffForHumans()]) }}</flux:text>
+                            @endif
                         </flux:table.cell>
                         <flux:table.cell align="end">
                             <div class="flex justify-end gap-1">
                                 <flux:button size="sm" variant="ghost" icon="printer" :href="$invoice->publicUrl()" target="_blank">{{ __('Open') }}</flux:button>
+                                <flux:button size="sm" variant="ghost" icon="arrow-down-tray" :href="$invoice->pdfUrl()">{{ __('PDF') }}</flux:button>
+                                @can('update', $customer)
+                                    <flux:button size="sm" variant="ghost" icon="envelope" wire:click="emailInvoice({{ $invoice->id }})">{{ __('Email') }}</flux:button>
+                                @endcan
                                 @if ($invoice->status->isOutstanding())
                                     @can(App\Support\Authorization\Permissions::INVOICES_VOID)
                                         <flux:button size="sm" variant="ghost" icon="x-mark" wire:click="voidInvoice({{ $invoice->id }})"

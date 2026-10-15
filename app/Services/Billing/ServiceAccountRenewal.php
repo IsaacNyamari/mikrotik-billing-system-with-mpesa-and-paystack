@@ -6,6 +6,7 @@ use App\Actions\ServiceAccounts\ChangeServiceAccountStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\ServiceAccountStatus;
 use App\Enums\ValidityUnit;
+use App\Jobs\SendCustomerInvoice;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\ServiceAccount;
@@ -154,6 +155,11 @@ class ServiceAccountRenewal
 
         if ($account === null) {
             return $payment;
+        }
+
+        // The receipt, by email, for a subscriber who gave an address.
+        if ($invoice !== null) {
+            SendCustomerInvoice::for($invoice);
         }
 
         // Back online: a line cut for not paying, or one waiting on its first payment. A line

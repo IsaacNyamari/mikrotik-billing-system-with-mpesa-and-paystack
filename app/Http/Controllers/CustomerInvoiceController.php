@@ -4,8 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\CustomerInvoice;
 use App\Models\ServiceAccount;
+use App\Models\Tenant;
+use App\Services\Billing\InvoicePdf;
 use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Contracts\View\View;
+use Illuminate\Http\Response;
 
 /**
  * One invoice or receipt, printable, for a subscriber who has no account to sign in with.
@@ -16,7 +19,31 @@ use Illuminate\Contracts\View\View;
  */
 class CustomerInvoiceController extends Controller
 {
-    public function __invoke(string $token, string $number): View
+    public function show(string $token, string $number): View
+    {
+        [$invoice, $account, $tenant] = $this->resolve($token, $number);
+
+        return view('pay.invoice', [
+            'invoice' => $invoice,
+            'account' => $account,
+            'tenant' => $tenant,
+        ]);
+    }
+
+    /**
+     * The same invoice as a PDF download.
+     */
+    public function pdf(string $token, string $number, InvoicePdf $pdf): Response
+    {
+        [$invoice] = $this->resolve($token, $number);
+
+        return $pdf->make($invoice)->download($pdf->filename($invoice));
+    }
+
+    /**
+     * @return array{0: CustomerInvoice, 1: ServiceAccount, 2: Tenant}
+     */
+    protected function resolve(string $token, string $number): array
     {
         $account = Tenancy::withoutScope(fn (): ?ServiceAccount => ServiceAccount::query()
             ->withoutGlobalScopes()
@@ -34,10 +61,6 @@ class CustomerInvoiceController extends Controller
             ->with(['customer', 'payment'])
             ->firstOrFail();
 
-        return view('pay.invoice', [
-            'invoice' => $invoice,
-            'account' => $account,
-            'tenant' => $tenant,
-        ]);
+        return [$invoice, $account, $tenant];
     }
 }
