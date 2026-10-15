@@ -57,7 +57,11 @@ abstract class ConsoleMenu
      * Only these properties ever reach the device. A field the form did not offer cannot be
      * smuggled in through the wire, because the console filters to this list before sending.
      *
-     * @return array<string, array{label: string, rules: array<int, mixed>, type?: string, options?: array<string, string>, placeholder?: string, description?: string, create_only?: bool}>
+     * `type` is text (the default), password or select. `clearable` lets an edit write an empty
+     * value — off by default, because RouterOS refuses an empty string for most properties
+     * (a time, an address) and leaving the field alone is what an empty box usually means.
+     *
+     * @return array<string, array{label: string, rules: array<int, mixed>, type?: string, options?: array<string, string>, placeholder?: string, description?: string, create_only?: bool, clearable?: bool}>
      */
     public function fields(): array
     {
@@ -77,6 +81,37 @@ abstract class ConsoleMenu
     public function canRemove(): bool
     {
         return false;
+    }
+
+    /**
+     * A menu that is one setting rather than a list of rows, like /system/identity.
+     *
+     * RouterOS gives its one row no id, so it is read whole and written with a bare `set`.
+     */
+    public function isSingleton(): bool
+    {
+        return false;
+    }
+
+    /**
+     * What removing a row is called. On a menu of live sessions it is a disconnect, and the
+     * button should say so.
+     */
+    public function removeLabel(): string
+    {
+        return __('Remove');
+    }
+
+    /**
+     * Whether rows RouterOS created by itself (flagged dynamic) are off limits.
+     *
+     * True for configuration menus: RouterOS refuses to edit a dynamic row anyway, and says so
+     * less helpfully than this does. Menus whose rows are all dynamic by nature — leases,
+     * sessions — turn it off.
+     */
+    public function protectsDynamic(): bool
+    {
+        return true;
     }
 
     /**
@@ -121,6 +156,16 @@ abstract class ConsoleMenu
     public function protects(array $row, Router $router): ?string
     {
         $comment = (string) ($row['comment'] ?? '');
+
+        if ($this->protectsDynamic() && ($row['dynamic'] ?? 'false') === 'true') {
+            return __('Created by RouterOS itself, and managed by it.');
+        }
+
+        // The rebuild script labels the router's own way out "Uplink". Matched exactly, so an
+        // ISP's own comment that merely mentions an uplink is still theirs to change.
+        if ($comment === 'Uplink') {
+            return __('This is the router\'s internet connection. Changing it can cut the platform off.');
+        }
 
         foreach (['Managed by the platform', 'Management address', 'Platform management server', 'Platform. Do not remove.'] as $marker) {
             if (str_contains($comment, $marker)) {
@@ -197,7 +242,7 @@ abstract class ConsoleMenu
      * Some properties can only be chosen at creation — RouterOS refuses to change them
      * afterwards, and offering a field that always fails is worse than not offering it.
      *
-     * @return array<string, array{label: string, rules: array<int, mixed>, type?: string, options?: array<string, string>, placeholder?: string, description?: string, create_only?: bool}>
+     * @return array<string, array{label: string, rules: array<int, mixed>, type?: string, options?: array<string, string>, placeholder?: string, description?: string, create_only?: bool, clearable?: bool}>
      */
     public function editableFields(bool $creating): array
     {
@@ -221,7 +266,9 @@ abstract class ConsoleMenu
         foreach (array_keys($this->editableFields($creating)) as $property) {
             $value = trim((string) ($values[$property] ?? ''));
 
-            if ($value === '' && $creating) {
+            $field = $this->editableFields($creating)[$property];
+
+            if ($value === '' && ($creating || ! ($field['clearable'] ?? $property === 'comment'))) {
                 continue;
             }
 

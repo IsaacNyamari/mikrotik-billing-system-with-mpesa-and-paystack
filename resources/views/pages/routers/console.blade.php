@@ -139,7 +139,9 @@ new #[Title('Router console')] class extends Component {
     {
         Gate::authorize('command', $this->router);
 
-        $row = collect($this->result['rows'])->firstWhere('.id', $id);
+        $row = $this->menu->isSingleton()
+            ? ($this->result['rows'][0] ?? null)
+            : collect($this->result['rows'])->firstWhere('.id', $id);
 
         if ($row === null) {
             Flux::toast(variant: 'danger', text: __('That row is no longer on the router. Refresh to see what is.'));
@@ -201,6 +203,21 @@ new #[Title('Router console')] class extends Component {
         }
     }
 
+    /**
+     * Restart the router, from the page an operator is already on when it misbehaves.
+     *
+     * Customers lose their sessions for the minute it takes; the outage watcher notices, and
+     * logs back in whoever was online, the same as after a power cut.
+     */
+    public function reboot(RouterConsole $console): void
+    {
+        Gate::authorize('command', $this->router);
+
+        if ($this->attempt(fn () => $console->reboot($this->router))) {
+            Flux::toast(variant: 'warning', text: __('Rebooting. The router will be back in a minute or two.'));
+        }
+    }
+
     public function run(string $id, string $command, RouterConsole $console): void
     {
         Gate::authorize('command', $this->router);
@@ -259,9 +276,22 @@ new #[Title('Router console')] class extends Component {
                 <flux:subheading>{{ __('Router console') }}</flux:subheading>
             </div>
 
-            <flux:button variant="ghost" icon="arrow-left" :href="route('routers.show', $router)" wire:navigate>
-                {{ __('Back to router') }}
-            </flux:button>
+            <div class="flex items-center gap-2">
+                @can('command', $router)
+                    <flux:button
+                        icon="power"
+                        variant="danger"
+                        wire:click="reboot"
+                        wire:confirm="{{ __('Reboot :name? Everyone on it goes offline for a minute or two. Customers who were online are logged back in automatically.', ['name' => $router->name]) }}"
+                    >
+                        {{ __('Reboot') }}
+                    </flux:button>
+                @endcan
+
+                <flux:button variant="ghost" icon="arrow-left" :href="route('routers.show', $router)" wire:navigate>
+                    {{ __('Back to router') }}
+                </flux:button>
+            </div>
         </div>
 
         <div class="flex items-start gap-6 max-md:flex-col">
@@ -335,7 +365,7 @@ new #[Title('Router console')] class extends Component {
                             <flux:table.rows>
                                 @forelse ($this->rows as $row)
                                     @php
-                                        $id = (string) ($row['.id'] ?? '');
+                                        $id = (string) ($row['.id'] ?? ($menu->isSingleton() ? 'singleton' : ''));
                                         $disabled = ($row['disabled'] ?? 'false') === 'true';
                                         $protected = $menu->protects($row, $router);
                                     @endphp
@@ -392,8 +422,8 @@ new #[Title('Router console')] class extends Component {
 
                                                             @if ($menu->canRemove())
                                                                 <flux:menu.separator />
-                                                                <flux:menu.item icon="trash" variant="danger" wire:click="remove('{{ $id }}')" wire:confirm="{{ __('Remove this from the router? This cannot be undone.') }}">
-                                                                    {{ __('Remove') }}
+                                                                <flux:menu.item icon="trash" variant="danger" wire:click="remove('{{ $id }}')" wire:confirm="{{ __(':action this on the router?', ['action' => $menu->removeLabel()]) }}">
+                                                                    {{ $menu->removeLabel() }}
                                                                 </flux:menu.item>
                                                             @endif
                                                         </flux:menu>
@@ -433,6 +463,14 @@ new #[Title('Router console')] class extends Component {
                                 <flux:select.option :value="$value">{{ $label }}</flux:select.option>
                             @endforeach
                         </flux:select>
+                    @elseif (($field['type'] ?? 'text') === 'password')
+                        <flux:input
+                            wire:model="form.{{ $key }}"
+                            type="password"
+                            viewable
+                            :label="$field['label']"
+                            :description="$field['description'] ?? null"
+                        />
                     @else
                         <flux:input
                             wire:model="form.{{ $key }}"

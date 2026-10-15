@@ -2,10 +2,27 @@
 
 namespace App\Services\RouterOs\Console;
 
+use App\Services\RouterOs\Console\Menus\AddressListsMenu;
 use App\Services\RouterOs\Console\Menus\DhcpLeasesMenu;
+use App\Services\RouterOs\Console\Menus\DnsStaticMenu;
+use App\Services\RouterOs\Console\Menus\FirewallFilterMenu;
+use App\Services\RouterOs\Console\Menus\FirewallNatMenu;
+use App\Services\RouterOs\Console\Menus\HotspotActiveMenu;
+use App\Services\RouterOs\Console\Menus\HotspotBindingsMenu;
+use App\Services\RouterOs\Console\Menus\HotspotHostsMenu;
+use App\Services\RouterOs\Console\Menus\HotspotProfilesMenu;
+use App\Services\RouterOs\Console\Menus\HotspotUsersMenu;
+use App\Services\RouterOs\Console\Menus\IdentityMenu;
 use App\Services\RouterOs\Console\Menus\InterfacesMenu;
+use App\Services\RouterOs\Console\Menus\IpAddressesMenu;
+use App\Services\RouterOs\Console\Menus\IpPoolsMenu;
 use App\Services\RouterOs\Console\Menus\LogMenu;
+use App\Services\RouterOs\Console\Menus\PppActiveMenu;
+use App\Services\RouterOs\Console\Menus\PppProfilesMenu;
+use App\Services\RouterOs\Console\Menus\PppSecretsMenu;
+use App\Services\RouterOs\Console\Menus\RoutesMenu;
 use App\Services\RouterOs\Console\Menus\SimpleQueuesMenu;
+use App\Services\RouterOs\Console\Menus\WalledGardenMenu;
 
 /**
  * Every screen the router console offers.
@@ -18,9 +35,26 @@ class ConsoleMenus
      * @var array<int, class-string<ConsoleMenu>>
      */
     protected const MENUS = [
+        HotspotActiveMenu::class,
+        HotspotUsersMenu::class,
+        HotspotProfilesMenu::class,
+        HotspotHostsMenu::class,
+        HotspotBindingsMenu::class,
+        WalledGardenMenu::class,
+        PppActiveMenu::class,
+        PppSecretsMenu::class,
+        PppProfilesMenu::class,
         InterfacesMenu::class,
+        IpAddressesMenu::class,
+        IpPoolsMenu::class,
         DhcpLeasesMenu::class,
+        RoutesMenu::class,
+        DnsStaticMenu::class,
+        FirewallNatMenu::class,
+        FirewallFilterMenu::class,
+        AddressListsMenu::class,
         SimpleQueuesMenu::class,
+        IdentityMenu::class,
         LogMenu::class,
     ];
 

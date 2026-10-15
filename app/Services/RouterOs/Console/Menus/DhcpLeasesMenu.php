@@ -96,6 +96,15 @@ class DhcpLeasesMenu extends ConsoleMenu
         return true;
     }
 
+    /**
+     * Most leases are dynamic — that is what DHCP hands out — and making one static is the
+     * reason to be on this screen at all.
+     */
+    public function protectsDynamic(): bool
+    {
+        return false;
+    }
+
     public function rowCommands(): array
     {
         return [

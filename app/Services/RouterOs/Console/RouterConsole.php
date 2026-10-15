@@ -5,6 +5,7 @@ namespace App\Services\RouterOs\Console;
 use App\Models\Router;
 use App\Services\RouterOs\Contracts\RouterOsConnection;
 use App\Services\RouterOs\Contracts\RouterOsConnector;
+use App\Services\RouterOs\Exceptions\RouterOsCommandException;
 use App\Support\Audit\AuditLogger;
 use Closure;
 
@@ -81,6 +82,19 @@ class RouterConsole
         $payload = $menu->payload($values, creating: false);
 
         $this->using($router, function (RouterOsConnection $connection) use ($router, $menu, $id, $payload): void {
+            if ($menu->isSingleton()) {
+                $row = $connection->first($menu->path()) ?? [];
+
+                if (($reason = $menu->protects(array_merge($row, $payload), $router)) !== null) {
+                    throw new ConsoleRefusal($reason);
+                }
+
+                $connection->execute(rtrim($menu->path(), '/').'/set', $payload);
+                $this->record($router, $menu, 'updated', $row, array_intersect_key($row, $payload), $payload);
+
+                return;
+            }
+
             $row = $this->guardedRow($connection, $router, $menu, $id);
 
             // The edited row must not end up protected either: writing a platform comment
@@ -130,6 +144,33 @@ class RouterConsole
                 ['disabled' => $disable ? 'true' : 'false'],
             );
         });
+    }
+
+    /**
+     * Restart the router.
+     *
+     * The connection usually drops before RouterOS answers, which is the reboot working rather
+     * than failing, so only a refusal — the API user lacking the reboot policy — is an error.
+     */
+    public function reboot(Router $router): void
+    {
+        $connection = $this->connector->connect($router);
+
+        try {
+            $connection->execute('/system/reboot');
+        } catch (RouterOsCommandException $e) {
+            throw $e;
+        } catch (\Throwable) {
+            // The socket closed under us as the router went down.
+        } finally {
+            $connection->disconnect();
+        }
+
+        $this->audit->record(
+            event: 'router.console.rebooted',
+            auditable: $router,
+            description: sprintf('Rebooted %s from the console', $router->name),
+        );
     }
 
     public function command(Router $router, ConsoleMenu $menu, string $id, string $command): void
@@ -222,7 +263,7 @@ class RouterConsole
      */
     protected function describe(array $row): string
     {
-        foreach (['name', 'address', 'mac-address', 'target'] as $property) {
+        foreach (['name', 'user', 'address', 'mac-address', 'dst-host', 'target', 'list'] as $property) {
             if (($row[$property] ?? '') !== '') {
                 return $row[$property];
             }

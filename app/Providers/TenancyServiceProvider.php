@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Models\User;
 use App\Services\Mpesa\Contracts\MpesaGateway;
 use App\Services\Mpesa\DarajaGateway;
+use App\Services\RouterOs\Console\PlatformRecords;
 use App\Services\RouterOs\Contracts\RouterOsConnector;
 use App\Services\RouterOs\LiveRouterOsConnector;
 use App\Services\RouterOs\PooledRouterOsConnector;
@@ -33,6 +34,10 @@ class TenancyServiceProvider extends ServiceProvider
             RouterOsConnector::class,
             fn ($app): RouterOsConnector => new PooledRouterOsConnector($app->make(LiveRouterOsConnector::class)),
         );
+
+        // Scoped for the same reason: it remembers which rows on a router the platform owns
+        // for the length of one request or job, and must not carry that into the next.
+        $this->app->scoped(PlatformRecords::class);
 
         // Same idea for Safaricom: tests swap this rather than reaching Daraja.
         $this->app->bind(MpesaGateway::class, DarajaGateway::class);
