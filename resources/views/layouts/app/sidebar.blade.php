@@ -16,8 +16,8 @@
                 {{-- The ISP's own name where there is one: an operator should never have to wonder
                      whose network they are looking at. --}}
                 <a href="{{ route('dashboard') }}" wire:navigate class="flex min-w-0 items-center gap-2.5">
-                    <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
-                        <x-app-logo-icon class="size-5 fill-current text-white" />
+                    <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-700">
+                        <x-app-logo-icon class="size-7" />
                     </span>
                     <span class="min-w-0 leading-tight">
                         <span class="block truncate text-sm font-bold text-zinc-900 dark:text-white">{{ $tenant?->name ?? config('app.name') }}</span>

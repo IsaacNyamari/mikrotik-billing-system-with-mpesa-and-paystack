@@ -5,14 +5,8 @@
     class="sticky top-0 z-50 border-b border-zinc-200/80 bg-white/85 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/85"
 >
     <nav class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4" aria-label="{{ __('Main') }}">
-        <a href="{{ route('home') }}" wire:navigate class="flex items-center gap-2 font-semibold tracking-tight">
-            <span class="flex size-8 items-center justify-center rounded-lg bg-zinc-900 text-white dark:bg-white dark:text-zinc-900">
-                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path d="M2 8.5a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16.5a5 5 0 0 1 6 0" stroke-linecap="round"/>
-                    <circle cx="12" cy="20" r="1.2" fill="currentColor" stroke="none"/>
-                </svg>
-            </span>
-            {{ config('app.name') }}
+        <a href="{{ route('home') }}" wire:navigate class="flex items-center">
+            <x-app-logo-full class="h-10" />
         </a>
 
         <div class="hidden items-center gap-1 md:flex">
