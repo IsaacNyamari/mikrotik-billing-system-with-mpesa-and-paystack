@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\Platform\PlatformSettings;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,9 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureDefaults();
+
+        // Settings the platform's owner saved in the dashboard, laid over .env.
+        PlatformSettings::apply();
     }
 
     /**

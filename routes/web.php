@@ -155,6 +155,7 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
     // an authorization check.
     Route::livewire('platform/subscriptions', 'pages::platform.subscriptions')->name('platform.subscriptions');
     Route::livewire('platform/payments', 'pages::platform.payments')->name('platform.payments');
+    Route::livewire('platform/settings', 'pages::platform.settings')->name('platform.settings');
 
     Route::livewire('reports/earnings', 'pages::reports.earnings')->name('reports.earnings');
     Route::livewire('settings/mpesa', 'pages::settings.mpesa')->name('settings.mpesa');

@@ -37,6 +37,7 @@
                     <flux:sidebar.item icon="receipt-percent" :href="route('platform.subscriptions')" :current="request()->routeIs('platform.subscriptions')" wire:navigate>{{ __('ISP subscriptions') }}</flux:sidebar.item>
 
                     <div class="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 in-data-flux-sidebar-collapsed-desktop:hidden dark:text-zinc-500">{{ __('Settings') }}</div>
+                    <flux:sidebar.item icon="cog-6-tooth" :href="route('platform.settings')" :current="request()->routeIs('platform.settings')" wire:navigate>{{ __('System settings') }}</flux:sidebar.item>
                     <flux:sidebar.item icon="credit-card" :href="route('platform.payments')" :current="request()->routeIs('platform.payments')" wire:navigate>{{ __('Platform payments') }}</flux:sidebar.item>
                     <flux:sidebar.item icon="user-circle" :href="route('profile.edit')" :current="request()->routeIs('profile.edit', 'security.edit', 'appearance.edit')" wire:navigate>{{ __('My account') }}</flux:sidebar.item>
                 </flux:sidebar.nav>
