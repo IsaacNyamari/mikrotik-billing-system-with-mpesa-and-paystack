@@ -28,6 +28,12 @@ Route::livewire('pay/{token}', 'pages::pay.show')->name('pay');
 Route::get('pay/{token}/invoices/{number}', [CustomerInvoiceController::class, 'show'])->name('pay.invoice');
 Route::get('pay/{token}/invoices/{number}/pdf', [CustomerInvoiceController::class, 'pdf'])->name('pay.invoice.pdf');
 
+// A PPPoE subscriber's own account: bill, connection details and whether they are online.
+// Under the ISP's own address, because phone numbers and PPPoE logins are only unique within
+// an ISP. Signed in by SMS code or PPPoE login (SubscriberAccess), never a staff account.
+Route::livewire('my/{tenant:slug}', 'pages::subscriber.login')->name('subscriber.login');
+Route::livewire('my/{tenant:slug}/account', 'pages::subscriber.dashboard')->name('subscriber.dashboard');
+
 // Fetched by the router itself during hotspot:install-portal, then served from its own
 // storage to customers.
 Route::get('p/{portalKey}/mikrotik/{page}', HotspotPageController::class)

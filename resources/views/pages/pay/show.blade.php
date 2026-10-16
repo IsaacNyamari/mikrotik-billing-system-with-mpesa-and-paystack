@@ -181,6 +181,7 @@ new #[Layout('components.layouts.pay')] #[Title('Pay for your internet')] class 
     <div class="text-center">
         <p class="text-xs font-bold uppercase tracking-[0.18em] text-brand-600">{{ App\Support\Tenancy\Facades\Tenancy::tenant()?->name }}</p>
         <h1 class="mt-2 text-2xl font-bold tracking-tight text-slate-900">{{ __('Pay for your internet') }}</h1>
+        <a href="{{ route('subscriber.login', ['tenant' => App\Support\Tenancy\Facades\Tenancy::tenant()?->slug]) }}" class="mt-1 inline-block text-sm font-semibold text-brand-700">{{ __('View my account, login details and connection') }}</a>
     </div>
 
     <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

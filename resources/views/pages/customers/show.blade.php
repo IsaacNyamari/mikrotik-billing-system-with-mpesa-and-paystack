@@ -425,6 +425,14 @@ new #[Title('Customer')] class extends Component {
                 <flux:subheading>
                     {{ __('Each service is its own network login. A customer may hold as many as they need.') }}
                 </flux:subheading>
+                @if ($this->serviceAccounts->contains(fn ($account) => $account->type === App\Enums\ServiceType::Pppoe))
+                    {{-- Where this subscriber checks their own bill, login and connection. --}}
+                    <flux:text size="sm" class="mt-1" x-data>
+                        {{ __('Their account page:') }}
+                        <span class="font-mono">{{ route('subscriber.login', ['tenant' => App\Support\Tenancy\Facades\Tenancy::tenant()?->slug]) }}</span>
+                        <button type="button" class="ms-1 font-medium text-blue-600" x-on:click="navigator.clipboard.writeText(@js(route('subscriber.login', ['tenant' => App\Support\Tenancy\Facades\Tenancy::tenant()?->slug]))); $el.textContent = @js(__('Copied'))">{{ __('Copy') }}</button>
+                    </flux:text>
+                @endif
             </div>
 
             @can('create', App\Models\ServiceAccount::class)

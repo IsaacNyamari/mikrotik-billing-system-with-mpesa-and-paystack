@@ -882,6 +882,21 @@ the same row). Numbered `INV-000001` per ISP by `SequenceGenerator`. Separate fr
   invoices are raised and settled inside transactions. Sent from `MAIL_FROM_ADDRESS` under
   the ISP's name, with replies to the ISP's `contact_email`.
 
+**Subscribers have their own account page** at `my/{tenant:slug}` (`pages::subscriber.login`,
+`.dashboard`, `SubscriberAccess`). Under the ISP's address because phone numbers and PPPoE
+logins are only unique within an ISP. Subscribers are not `User`s and get no password of
+their own: they sign in with a six-digit SMS code to the phone on their customer record (ten
+minutes, five tries, hashed in the cache, one use; the page never says whether a number is
+registered) or with their PPPoE username and password. The session holds only the tenant and
+customer ids and is re-read on every request, so the ISP is rebound with no middleware, as on
+the portal. Only customers with a non-terminated PPPoE line get in. Rate limited per address.
+
+The dashboard shows, per line: **connection** (`SubscriberConnection`, `/ppp/active` and the
+`<pppoe-name>` interface's bytes, cached 20 s; an open outage answers without asking the
+router), **billing** (paid-until, the pay link, invoices with PDFs, recent payments) and
+**credentials** (username, password only after Show, the PPPoE service name). The customer
+page and the pay page link to it.
+
 **SMS is HostPinnacle** (`itsmurumba/laravel-hostpinnacle`, SaaS mode left off) behind
 `SmsSender`. The ISP's own account (`sms_settings`, password and API key encrypted, sender ID
 theirs) is used first, then the platform's (`HOSTPINNACLE_*` in the environment), else the
