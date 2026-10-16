@@ -21,8 +21,10 @@ use Illuminate\Database\Eloquent\Model;
  * @property string|null $api_key
  * @property string|null $sender_id
  * @property int $remind_days_before
+ * @property string|null $alert_phones
+ * @property bool $alert_outages
  */
-#[Fillable(['is_enabled', 'username', 'sender_id', 'remind_days_before'])]
+#[Fillable(['is_enabled', 'username', 'sender_id', 'remind_days_before', 'alert_phones', 'alert_outages'])]
 #[Hidden(['password', 'api_key'])]
 class SmsSetting extends Model
 {
@@ -34,6 +36,7 @@ class SmsSetting extends Model
     protected $attributes = [
         'is_enabled' => true,
         'remind_days_before' => 3,
+        'alert_outages' => true,
     ];
 
     /**
@@ -44,6 +47,7 @@ class SmsSetting extends Model
         return [
             'is_enabled' => 'boolean',
             'remind_days_before' => 'integer',
+            'alert_outages' => 'boolean',
             'password' => 'encrypted',
             'api_key' => 'encrypted',
         ];

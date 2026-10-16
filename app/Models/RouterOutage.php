@@ -30,6 +30,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $credited_seconds
  * @property int $relogged_users
  * @property CarbonImmutable|null $compensated_at
+ * @property CarbonImmutable|null $alerted_at
  */
 class RouterOutage extends Model
 {
@@ -55,6 +56,7 @@ class RouterOutage extends Model
             'ended_at' => 'datetime',
             'device_booted_at' => 'datetime',
             'compensated_at' => 'datetime',
+            'alerted_at' => 'datetime',
             'cause' => OutageCause::class,
         ];
     }

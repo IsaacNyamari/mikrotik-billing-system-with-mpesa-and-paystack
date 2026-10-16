@@ -17,6 +17,8 @@ new #[Title('SMS')] class extends Component {
     public string $username = '';
     public string $sender_id = '';
     public int $remind_days_before = 3;
+    public string $alert_phones = '';
+    public bool $alert_outages = true;
 
     // Write-only: left blank means "keep what is stored", and stored values never reach the page.
     public string $password = '';
@@ -35,6 +37,8 @@ new #[Title('SMS')] class extends Component {
             'username' => (string) $settings->username,
             'sender_id' => (string) $settings->sender_id,
             'remind_days_before' => $settings->remind_days_before,
+            'alert_phones' => (string) $settings->alert_phones,
+            'alert_outages' => $settings->alert_outages,
         ]);
     }
 
@@ -107,6 +111,48 @@ new #[Title('SMS')] class extends Component {
         Flux::toast(variant: 'success', text: __('SMS settings saved.'));
     }
 
+    /**
+     * Who at the ISP is texted when a router goes down and comes back.
+     */
+    public function saveAlerts(AuditLogger $audit): void
+    {
+        Gate::authorize(Permissions::SETTINGS_UPDATE);
+
+        $phones = collect(explode(',', $this->alert_phones))->map(fn (string $p): string => trim($p))->filter()->values();
+
+        $this->validate([
+            'alert_outages' => ['boolean'],
+            'alert_phones' => ['nullable', 'string', 'max:120'],
+        ]);
+
+        foreach ($phones as $phone) {
+            if (preg_match('/^(?:\+?254|0)?[17]\d{8}$/', str_replace(' ', '', $phone)) !== 1) {
+                $this->addError('alert_phones', __(':phone is not a mobile number like 07XX XXX XXX.', ['phone' => $phone]));
+
+                return;
+            }
+        }
+
+        if ($phones->count() > 5) {
+            $this->addError('alert_phones', __('Up to five numbers.'));
+
+            return;
+        }
+
+        $settings = $this->settings;
+        $settings->fill([
+            'alert_outages' => $this->alert_outages,
+            'alert_phones' => $phones->isEmpty() ? null : $phones->implode(', '),
+        ]);
+        $settings->save();
+
+        unset($this->settings);
+
+        $audit->record(event: 'sms.alerts_updated', auditable: $settings, description: __('Saved router alert numbers'));
+
+        Flux::toast(variant: 'success', text: __('Router alerts saved.'));
+    }
+
     public function sendTest(SmsSender $sms): void
     {
         Gate::authorize(Permissions::SETTINGS_UPDATE);
@@ -168,6 +214,24 @@ new #[Title('SMS')] class extends Component {
 
                 <div>
                     <flux:button variant="primary" type="submit">{{ __('Save') }}</flux:button>
+                </div>
+            </form>
+        </flux:card>
+
+        <flux:card>
+            <form wire:submit="saveAlerts" class="flex flex-col gap-5">
+                <div>
+                    <flux:heading size="lg">{{ __('Router alerts') }}</flux:heading>
+                    <flux:text size="sm" class="opacity-70">{{ __('A text when a router has been down for :minutes minutes (power or internet lost at the site), and another when it is back, with the cause and how long it was out. Sent at any hour, even with subscriber texts switched off.', ['minutes' => App\Services\RouterOs\Outages\OutageAlerts::GRACE_MINUTES]) }}</flux:text>
+                </div>
+
+                <flux:input wire:model="alert_phones" :label="__('Numbers to text')" placeholder="0712 345 678, 0733 000 111"
+                    :description="__('Up to five, separated by commas. Left empty, your contact phone (:phone) is used.', ['phone' => App\Support\Tenancy\Facades\Tenancy::tenant()?->contact_phone ?: __('none set')])" />
+
+                <flux:switch wire:model="alert_outages" :label="__('Text me when a router goes down')" />
+
+                <div>
+                    <flux:button variant="primary" type="submit">{{ __('Save alerts') }}</flux:button>
                 </div>
             </form>
         </flux:card>

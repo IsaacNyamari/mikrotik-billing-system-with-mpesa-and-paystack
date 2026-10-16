@@ -26,7 +26,11 @@ class SmsSender
 {
     public const BASE_URL = 'https://smsportal.hostpinnacle.co.ke/SMSApi';
 
-    public function send(string $phone, string $body, string $kind, ?ServiceAccount $account = null): SmsMessage
+    /**
+     * @param  bool  $operator  A message to the ISP's own people (a router alert) rather than a
+     *                          subscriber: sent even when texts to subscribers are switched off.
+     */
+    public function send(string $phone, string $body, string $kind, ?ServiceAccount $account = null, bool $operator = false): SmsMessage
     {
         $message = new SmsMessage([
             'service_account_id' => $account?->id,
@@ -36,7 +40,7 @@ class SmsSender
             'status' => SmsMessage::SKIPPED,
         ]);
 
-        $credentials = $this->credentials();
+        $credentials = $this->credentials($operator);
 
         if ($credentials === null) {
             $message->error = __('No SMS account is set up.');
@@ -84,11 +88,11 @@ class SmsSender
         return $this->credentials() !== null;
     }
 
-    protected function credentials(): ?HostpinnacleCredentials
+    protected function credentials(bool $operator = false): ?HostpinnacleCredentials
     {
         $settings = SmsSetting::current();
 
-        if (! $settings->is_enabled) {
+        if (! $settings->is_enabled && ! $operator) {
             return null;
         }
 

@@ -330,6 +330,14 @@ after that or five refusals. A customer who signed in themselves counts as done.
 **`hotspot:sweep` skips routers with an open outage.** Otherwise the first minute a router
 answers again, the sweeper would expire the very customers the watcher is about to extend.
 
+**The ISP is texted** (`OutageAlerts`, Settings → SMS → Router alerts): once a router has been
+silent for 3 minutes (a single missed probe is a tunnel catching its breath, and an ISP woken
+for blips learns to ignore alerts), and again on recovery with the duration and the cause —
+which is only known then. Up to five numbers, else the ISP's `contact_phone`. `alerted_at` on
+the outage is claimed with a conditional update before sending, so overlapping watchers text
+once, and the recovery text only follows a down text that went out. Sent with
+`SmsSender::send(operator: true)`: at any hour and even with subscriber texts switched off.
+
 Customers are told on the captive portal (`outageNotice()`): exactly how much time their own
 package gained, or, for everyone else, that it happened and running packages were credited.
 Shown for three hours after recovery. The ISP sees outages on the router page.

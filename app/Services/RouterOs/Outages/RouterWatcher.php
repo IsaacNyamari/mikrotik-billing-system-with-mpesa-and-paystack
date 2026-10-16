@@ -43,6 +43,7 @@ class RouterWatcher
         protected HotspotRelogin $relogin,
         protected AuditLogger $audit,
         protected SetupFinisher $finisher,
+        protected OutageAlerts $alerts,
     ) {}
 
     public function watch(Router $router): void
@@ -90,9 +91,12 @@ class RouterWatcher
             return;
         }
 
-        $open = RouterOutage::query()->where('router_id', $router->id)->open()->exists();
+        $open = RouterOutage::query()->where('router_id', $router->id)->open()->latest('started_at')->first();
 
-        if ($open) {
+        if ($open !== null) {
+            // Still down: text the ISP once it has been down long enough to matter.
+            $this->alerts->stillDown($router, $open);
+
             return;
         }
 
@@ -135,6 +139,8 @@ class RouterWatcher
         );
 
         $this->compensator->compensate($outage);
+
+        $this->alerts->recovered($router, $outage);
     }
 
     /**
