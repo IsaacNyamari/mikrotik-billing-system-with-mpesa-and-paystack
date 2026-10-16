@@ -54,8 +54,18 @@ class RouterWatcher
 
         $this->probe->probe($router);
 
+        // Alerts not yet accepted by the SMS provider go again, whatever state the router is in.
+        $this->alerts->retry($router);
+
         if ($router->status === RouterStatus::Offline) {
             $this->down($router, $lastSeen);
+
+            return;
+        }
+
+        if ($router->status === RouterStatus::Error) {
+            // It answered, but the platform cannot manage it.
+            $this->alerts->failing($router);
 
             return;
         }
@@ -63,6 +73,8 @@ class RouterWatcher
         if ($router->status !== RouterStatus::Online) {
             return;
         }
+
+        $this->alerts->working($router);
 
         $open = RouterOutage::query()->where('router_id', $router->id)->open()->latest('started_at')->first();
 
@@ -91,12 +103,9 @@ class RouterWatcher
             return;
         }
 
-        $open = RouterOutage::query()->where('router_id', $router->id)->open()->latest('started_at')->first();
+        $open = RouterOutage::query()->where('router_id', $router->id)->open()->exists();
 
-        if ($open !== null) {
-            // Still down: text the ISP once it has been down long enough to matter.
-            $this->alerts->stillDown($router, $open);
-
+        if ($open) {
             return;
         }
 
@@ -112,6 +121,9 @@ class RouterWatcher
             auditable: $router,
             description: sprintf('%s stopped answering. Last seen %s.', $router->name, $outage->started_at->toDateTimeString()),
         );
+
+        // The ISP hears about it now, not when it is over.
+        $this->alerts->opened($router, $outage);
     }
 
     /**

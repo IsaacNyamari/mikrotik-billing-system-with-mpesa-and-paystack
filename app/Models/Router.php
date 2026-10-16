@@ -39,6 +39,7 @@ use Illuminate\Support\Str;
  * @property string|null $wg_public_key
  * @property string|null $wg_address
  * @property CarbonImmutable|null $wg_configured_at
+ * @property CarbonImmutable|null $error_alerted_at
  * @property array<string, mixed>|null $setup_options
  * @property string|null $provision_token
  * @property CarbonImmutable|null $provision_token_expires_at
@@ -128,6 +129,7 @@ class Router extends Model
             'uses_tls' => 'boolean',
             'last_seen_at' => 'datetime',
             'wg_configured_at' => 'datetime',
+            'error_alerted_at' => 'datetime',
             'setup_options' => 'array',
             'provision_token_expires_at' => 'datetime',
             'provision_fetched_at' => 'datetime',

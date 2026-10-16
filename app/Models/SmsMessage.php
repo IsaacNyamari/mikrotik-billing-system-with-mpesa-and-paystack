@@ -15,6 +15,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $id
  * @property int $tenant_id
  * @property int|null $service_account_id
+ * @property int|null $router_id
+ * @property string|null $alert_key
  * @property string $phone
  * @property string $kind
  * @property string $body
@@ -22,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $error
  * @property array<string, mixed>|null $response
  */
-#[Fillable(['service_account_id', 'phone', 'kind', 'body', 'status', 'error', 'response'])]
+#[Fillable(['service_account_id', 'router_id', 'alert_key', 'phone', 'kind', 'body', 'status', 'error', 'response'])]
 class SmsMessage extends Model
 {
     use BelongsToTenant;

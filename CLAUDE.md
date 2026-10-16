@@ -330,13 +330,22 @@ after that or five refusals. A customer who signed in themselves counts as done.
 **`hotspot:sweep` skips routers with an open outage.** Otherwise the first minute a router
 answers again, the sweeper would expire the very customers the watcher is about to extend.
 
-**The ISP is texted** (`OutageAlerts`, Settings → SMS → Router alerts): once a router has been
-silent for 3 minutes (a single missed probe is a tunnel catching its breath, and an ISP woken
-for blips learns to ignore alerts), and again on recovery with the duration and the cause —
-which is only known then. Up to five numbers, else the ISP's `contact_phone`. `alerted_at` on
-the outage is claimed with a conditional update before sending, so overlapping watchers text
-once, and the recovery text only follows a down text that went out. Sent with
-`SmsSender::send(operator: true)`: at any hour and even with subscriber texts switched off.
+**The ISP is told at once** (`OutageAlerts`, Settings → SMS → Router alerts), on the first
+failed check rather than after a grace period:
+
+- **Down** when an outage opens, **back** when it closes with the duration and the cause
+  (only known then). The outage's `alerted_at` is claimed with a conditional update before
+  sending, so overlapping watchers alert once; the recovery only follows a down alert.
+- **Failing** (`RouterStatus::Error`: it answers but refuses to be managed) once per episode
+  via `routers.error_alerted_at`, and **working again** when it clears.
+- **Getting it there**: `SmsSender::sendAlert()` tries the ISP's HostPinnacle account, then
+  the platform's (`HOSTPINNACLE_*`), each attempt an `sms_messages` row keyed by
+  `router_id` + `alert_key`. `retry()` runs on every watch and re-sends anything not yet
+  accepted, a minute apart, up to `MAX_ATTEMPTS` rows within six hours. A copy is emailed to
+  the ISP's `contact_email`. "Sent" means HostPinnacle accepted it; handset delivery reports
+  are not read.
+- Up to five numbers, else the ISP's `contact_phone`. Any hour, and even with subscriber
+  texts switched off (`operator`).
 
 Customers are told on the captive portal (`outageNotice()`): exactly how much time their own
 package gained, or, for everyone else, that it happened and running packages were credited.

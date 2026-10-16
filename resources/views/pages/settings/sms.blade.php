@@ -222,7 +222,7 @@ new #[Title('SMS')] class extends Component {
             <form wire:submit="saveAlerts" class="flex flex-col gap-5">
                 <div>
                     <flux:heading size="lg">{{ __('Router alerts') }}</flux:heading>
-                    <flux:text size="sm" class="opacity-70">{{ __('A text when a router has been down for :minutes minutes (power or internet lost at the site), and another when it is back, with the cause and how long it was out. Sent at any hour, even with subscriber texts switched off.', ['minutes' => App\Services\RouterOs\Outages\OutageAlerts::GRACE_MINUTES]) }}</flux:text>
+                    <flux:text size="sm" class="opacity-70">{{ __('A text the minute a router stops responding (power or internet lost at the site) or stops accepting management, and another when it is back, with the cause and how long it was out. Each text is retried every minute until your SMS provider accepts it, through the platform\'s account if yours refuses, and a copy goes to your contact email. Sent at any hour, even with subscriber texts switched off.') }}</flux:text>
                 </div>
 
                 <flux:input wire:model="alert_phones" :label="__('Numbers to text')" placeholder="0712 345 678, 0733 000 111"
