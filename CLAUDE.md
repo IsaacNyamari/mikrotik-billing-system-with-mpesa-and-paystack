@@ -72,6 +72,13 @@ Single shared database, `tenant_id` column on every tenant-owned table, enforced
   - `Tenancy::withoutScope(fn () => ...)` — deliberately span all ISPs.
 - Platform super admins have `tenant_id = null` and are the only identity allowed to cross tenants.
   They start unscoped and switch into an ISP through the session.
+- **A super admin outside an ISP sees only the platform** (`platform.overview`: system stats
+  and what ISPs paid the platform by month; ISPs; ISP subscriptions; Platform payments; their
+  own account). `ResolveTenant` redirects every ISP screen there. An ISP is reached only by
+  **Open as this ISP** on the ISPs page (`tenants.select`, now at `platform/isps`), which is
+  impersonation: the ISP's own sidebar and pages, an amber banner naming the ISP, and **Exit
+  to platform** (`platform.exit`). Both ends are audited on the ISP's own trail
+  (`platform.impersonation_started` / `_ended`).
 - `User` is deliberately **not** globally scoped: Fortify looks a user up by email before any
   tenant is known. Use `User::query()->ofTenant($id)` on listing screens.
 - RADIUS requests are attributed to a tenant through the registered router/NAS mapping.

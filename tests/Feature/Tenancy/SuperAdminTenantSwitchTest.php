@@ -42,7 +42,7 @@ class SuperAdminTenantSwitchTest extends TestCase
         // Rather than a stack trace, which is what a missing choice used to produce.
         $this->actingAs($this->superAdmin)
             ->get(route('reports.earnings'))
-            ->assertRedirect(route('tenants.select'));
+            ->assertRedirect(route('platform.overview'));
     }
 
     #[Test]

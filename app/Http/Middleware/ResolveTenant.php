@@ -37,11 +37,11 @@ class ResolveTenant
             // guarantee worth resting tenant isolation on.
             Tenancy::forget();
 
-            // A super admin belongs to no ISP, so every tenant-scoped screen would throw for
-            // them. Sending them to pick one here is far better than letting the query fail
-            // deep inside a view, where it is too late to do anything graceful.
+            // A super admin belongs to no ISP. Outside an ISP they have the platform's own
+            // screens and nothing else: an ISP's pages are reached by opening that ISP from the
+            // ISPs page, never by wandering into one. (They would also throw, being scoped.)
             if ($user->isSuperAdmin() && $this->shouldChooseTenant($request)) {
-                return redirect()->route('tenants.select');
+                return redirect()->route('platform.overview');
             }
 
             return $next($request);
@@ -69,7 +69,7 @@ class ResolveTenant
             return false;
         }
 
-        if ($request->routeIs('tenants.select', 'logout', 'profile.edit', 'appearance.edit', 'security.edit')) {
+        if ($request->routeIs('tenants.select', 'logout', 'profile.edit', 'appearance.edit', 'security.edit', 'docs.*')) {
             return false;
         }
 

@@ -53,7 +53,7 @@ class AFreshPlatformDoesNotThrowAtItsAdminTest extends TestCase
         foreach (['routers.index', 'monitor.index', 'customers.index', 'plans.index', 'dashboard'] as $route) {
             $this->actingAs($this->admin)
                 ->get(route($route))
-                ->assertRedirect(route('tenants.select'));
+                ->assertRedirect(route('platform.overview'));
         }
     }
 

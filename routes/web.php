@@ -7,7 +7,10 @@ use App\Http\Controllers\PaystackWebhookController;
 use App\Http\Controllers\PlatformMpesaCallbackController;
 use App\Http\Controllers\PlatformPaystackWebhookController;
 use App\Http\Controllers\RouterProvisionController;
+use App\Http\Middleware\ResolveTenant;
 use App\Models\Router;
+use App\Support\Audit\AuditLogger;
+use App\Support\Tenancy\Facades\Tenancy;
 use Illuminate\Support\Facades\Route;
 
 // The public site. Anyone reading these has internet, so unlike the captive portal these
@@ -123,9 +126,30 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
     Route::livewire('plans/create', 'pages::plans.form')->name('plans.create');
     Route::livewire('plans/{plan}/edit', 'pages::plans.form')->name('plans.edit');
 
-    // Platform super admins belong to no ISP, so they pick one here before any tenant-scoped
-    // screen has anything to show.
-    Route::livewire('select-isp', 'pages::tenants.select')->name('tenants.select');
+    // The platform's own area. A super admin lands on the overview and sees no ISP's screens
+    // until they open one from the ISPs page (impersonation, audited at both ends).
+    Route::livewire('platform', 'pages::platform.overview')->name('platform.overview');
+    Route::livewire('platform/isps', 'pages::tenants.select')->name('tenants.select');
+    Route::redirect('select-isp', '/platform/isps');
+
+    Route::post('platform/exit-isp', function (AuditLogger $audit) {
+        abort_unless(auth()->user()?->isSuperAdmin(), 403);
+
+        $tenant = Tenancy::tenant();
+
+        if ($tenant !== null) {
+            $audit->record(
+                event: 'platform.impersonation_ended',
+                auditable: $tenant,
+                description: sprintf('%s left %s', auth()->user()?->email, $tenant->name),
+            );
+        }
+
+        session()->forget(ResolveTenant::IMPERSONATION_KEY);
+        Tenancy::forget();
+
+        return redirect()->route('platform.overview');
+    })->name('platform.exit');
 
     // Runs the platform's own billing. Guarded inside the component too — a route name is not
     // an authorization check.

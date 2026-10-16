@@ -4,6 +4,9 @@
     $user = auth()->user();
     $tenant = Tenancy::tenant();
     $role = $user->isSuperAdmin() ? __('Platform admin') : ($user->roles->first()?->label ?? __('Operator'));
+    // A platform admin outside any ISP sees the platform's screens only. Inside one (opened
+    // from the ISPs page) they see exactly what that ISP's owner sees, under a banner.
+    $platformView = $user->isSuperAdmin() && ! Tenancy::has();
 @endphp
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="dark">
@@ -15,28 +18,29 @@
             <flux:sidebar.header>
                 {{-- The ISP's own name where there is one: an operator should never have to wonder
                      whose network they are looking at. --}}
-                <a href="{{ route('dashboard') }}" wire:navigate class="flex min-w-0 items-center gap-2.5">
+                <a href="{{ $platformView ? route('platform.overview') : route('dashboard') }}" wire:navigate class="flex min-w-0 items-center gap-2.5">
                     <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-white shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-700">
                         <x-app-logo-icon class="size-7" />
                     </span>
                     <span class="min-w-0 leading-tight">
                         <span class="block truncate text-sm font-bold text-zinc-900 dark:text-white">{{ $tenant?->name ?? config('app.name') }}</span>
-                        <span class="block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{{ __('ISP management') }}</span>
+                        <span class="block text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{{ $platformView ? __('Platform admin') : __('ISP management') }}</span>
                     </span>
                 </a>
                 <flux:sidebar.collapse class="lg:hidden" />
             </flux:sidebar.header>
 
-            @if ($user->isSuperAdmin())
-                {{-- A platform admin can be looking at any ISP, so which one has to be on screen at
-                     all times — otherwise it is far too easy to change the wrong ISP's settings. --}}
-                <div class="px-2 pb-1">
-                    <flux:button size="sm" variant="ghost" icon="building-office-2" icon-trailing="chevrons-up-down" :href="route('tenants.select')" wire:navigate class="w-full justify-start">
-                        {{ $tenant?->name ?? __('All ISPs') }}
-                    </flux:button>
-                </div>
-            @endif
+            @if ($platformView)
+                <flux:sidebar.nav>
+                    <flux:sidebar.item icon="chart-bar-square" :href="route('platform.overview')" :current="request()->routeIs('platform.overview')" wire:navigate>{{ __('Overview') }}</flux:sidebar.item>
+                    <flux:sidebar.item icon="building-office-2" :href="route('tenants.select')" :current="request()->routeIs('tenants.select')" wire:navigate>{{ __('ISPs') }}</flux:sidebar.item>
+                    <flux:sidebar.item icon="receipt-percent" :href="route('platform.subscriptions')" :current="request()->routeIs('platform.subscriptions')" wire:navigate>{{ __('ISP subscriptions') }}</flux:sidebar.item>
 
+                    <div class="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 in-data-flux-sidebar-collapsed-desktop:hidden dark:text-zinc-500">{{ __('Settings') }}</div>
+                    <flux:sidebar.item icon="credit-card" :href="route('platform.payments')" :current="request()->routeIs('platform.payments')" wire:navigate>{{ __('Platform payments') }}</flux:sidebar.item>
+                    <flux:sidebar.item icon="user-circle" :href="route('profile.edit')" :current="request()->routeIs('profile.edit', 'security.edit', 'appearance.edit')" wire:navigate>{{ __('My account') }}</flux:sidebar.item>
+                </flux:sidebar.nav>
+            @else
             <flux:sidebar.nav>
                 <flux:sidebar.group expandable :expanded="request()->routeIs('dashboard', 'reports.*', 'monitor.*')" icon="squares-2x2" :heading="__('Dashboards')" class="grid">
                     <flux:sidebar.item :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>{{ __('Overview') }}</flux:sidebar.item>
@@ -118,14 +122,8 @@
                     </flux:sidebar.group>
                 @endif
 
-                @if ($user->isSuperAdmin())
-                    <flux:sidebar.group class="grid">
-                        <div class="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 in-data-flux-sidebar-collapsed-desktop:hidden dark:text-zinc-500">{{ __('Platform admin') }}</div>
-                        <flux:sidebar.item icon="building-office-2" :href="route('platform.subscriptions')" :current="request()->routeIs('platform.subscriptions')" wire:navigate>{{ __('ISP subscriptions') }}</flux:sidebar.item>
-                        <flux:sidebar.item icon="credit-card" :href="route('platform.payments')" :current="request()->routeIs('platform.payments')" wire:navigate>{{ __('Platform payments') }}</flux:sidebar.item>
-                    </flux:sidebar.group>
-                @endif
             </flux:sidebar.nav>
+            @endif
 
             <flux:spacer />
 
@@ -142,6 +140,7 @@
         <flux:header sticky class="border-b border-zinc-200 bg-white/90 backdrop-blur dark:border-zinc-700 dark:bg-zinc-950/90">
             <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
 
+            @if (! $platformView)
             @can('viewAny', App\Models\Customer::class)
                 <form method="GET" action="{{ route('customers.index') }}" class="hidden w-full max-w-md sm:block"
                       x-data @keydown.window.ctrl.k.prevent="$refs.search.focus()" @keydown.window.meta.k.prevent="$refs.search.focus()">
@@ -157,6 +156,7 @@
                     </label>
                 </form>
             @endcan
+            @endif
 
             <flux:spacer />
 
