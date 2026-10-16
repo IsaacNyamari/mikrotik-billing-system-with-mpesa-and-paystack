@@ -141,7 +141,7 @@ Route::middleware(['auth', 'verified', 'subscribed'])->group(function () {
             $audit->record(
                 event: 'platform.impersonation_ended',
                 auditable: $tenant,
-                description: sprintf('%s left %s', auth()->user()?->email, $tenant->name),
+                description: sprintf('%s left %s', auth()->user()->email, $tenant->name),
             );
         }
 
