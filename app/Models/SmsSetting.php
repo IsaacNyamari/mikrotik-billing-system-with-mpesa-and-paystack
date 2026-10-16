@@ -36,7 +36,8 @@ class SmsSetting extends Model
     protected $attributes = [
         'is_enabled' => true,
         'remind_days_before' => 3,
-        'alert_outages' => true,
+        // Opt-in: see the migration that turned them off.
+        'alert_outages' => false,
     ];
 
     /**

@@ -140,6 +140,11 @@ class OutageAlerts
      */
     public function retry(Router $router): void
     {
+        // Switched off means nothing more goes out, including alerts queued before it was.
+        if (! SmsSetting::current()->alert_outages) {
+            return;
+        }
+
         $attempts = SmsMessage::query()
             ->where('router_id', $router->id)
             ->whereNotNull('alert_key')

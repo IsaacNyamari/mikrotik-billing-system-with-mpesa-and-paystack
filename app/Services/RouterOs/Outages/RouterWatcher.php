@@ -11,6 +11,7 @@ use App\Services\RouterOs\Contracts\RouterOsConnector;
 use App\Services\RouterOs\RouterHealthProbe;
 use App\Support\Audit\AuditLogger;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 /**
@@ -46,6 +47,14 @@ class RouterWatcher
         protected OutageAlerts $alerts,
     ) {}
 
+    /** Missed checks in a row before an outage is opened. Checks run a minute apart. */
+    public const CONFIRM_AFTER_MISSES = 3;
+
+    public static function missesKey(Router $router): string
+    {
+        return 'router-misses:'.$router->id;
+    }
+
     public function watch(Router $router): void
     {
         // Read before the probe overwrites it: this is the last moment the router was known to
@@ -62,6 +71,9 @@ class RouterWatcher
 
             return;
         }
+
+        // It answered: whatever run of missed checks there was is over.
+        Cache::forget(self::missesKey($router));
 
         if ($router->status === RouterStatus::Error) {
             // It answered, but the platform cannot manage it.
@@ -106,6 +118,19 @@ class RouterWatcher
         $open = RouterOutage::query()->where('router_id', $router->id)->open()->exists();
 
         if ($open) {
+            return;
+        }
+
+        // One missed check is usually the tunnel, not the router: production saw a dozen
+        // two-minute "outages" a day on a router that never went down. An outage opens on the
+        // third miss in a row; it still starts from when the router was last seen, so a real
+        // one loses none of its length and customers are credited all of it.
+        // Read and written rather than incremented: some cache stores answer an increment of a
+        // missing key with false. One watch job per router runs at a time, so this cannot race.
+        $misses = (int) Cache::get(self::missesKey($router), 0) + 1;
+        Cache::put(self::missesKey($router), $misses, now()->addMinutes(30));
+
+        if ($misses < self::CONFIRM_AFTER_MISSES) {
             return;
         }
 

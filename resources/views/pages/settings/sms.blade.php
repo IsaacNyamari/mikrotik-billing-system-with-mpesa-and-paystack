@@ -18,7 +18,7 @@ new #[Title('SMS')] class extends Component {
     public string $sender_id = '';
     public int $remind_days_before = 3;
     public string $alert_phones = '';
-    public bool $alert_outages = true;
+    public bool $alert_outages = false;
 
     // Write-only: left blank means "keep what is stored", and stored values never reach the page.
     public string $password = '';
